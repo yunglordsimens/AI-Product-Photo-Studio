@@ -8,6 +8,8 @@ interface NoteItemProps {
   isAttached: boolean;
   attachedCardName?: string;
   onMouseDown: (e: React.MouseEvent, noteId: string) => void;
+  onPointerDown?: (e: React.PointerEvent, noteId: string) => void;
+  onTouchStart?: (e: React.TouchEvent, noteId: string) => void;
   onUpdateText: (noteId: string, text: string) => void;
   onUpdateColor: (noteId: string, color: NoteColor) => void;
   onUpdateSize: (noteId: string, width: number, height: number) => void;
@@ -71,6 +73,8 @@ export const NoteItem: React.FC<NoteItemProps> = memo(
     isAttached,
     attachedCardName,
     onMouseDown,
+    onPointerDown,
+    onTouchStart,
     onUpdateText,
     onUpdateColor,
     onUpdateSize,
@@ -178,15 +182,18 @@ export const NoteItem: React.FC<NoteItemProps> = memo(
         <div
           id={`note-node-${note.id}`}
           onMouseDown={(e) => onMouseDown(e, note.id)}
+          onPointerDown={(e) => onPointerDown && onPointerDown(e, note.id)}
+          onTouchStart={(e) => onTouchStart && onTouchStart(e, note.id)}
           onDoubleClick={handleDoubleClick}
           onContextMenu={handleContextMenu}
           style={{
-            transform: `translate(${note.x}px, ${note.y}px)`,
+            transform: `translate3d(${note.x}px, ${note.y}px, 0)`,
             width: `${note.width || 180}px`,
             minHeight: `${note.height || 140}px`,
             zIndex: isSelected ? 40 : note.zIndex || 20,
+            touchAction: 'none',
           }}
-          className={`group absolute top-0 left-0 rounded-xl shadow-lg border transition-all duration-100 select-none flex flex-col overflow-hidden cursor-grab active:cursor-grabbing ${
+          className={`group absolute top-0 left-0 rounded-xl shadow-lg border transition-all duration-100 select-none flex flex-col overflow-hidden pointer-events-auto cursor-grab active:cursor-grabbing ${
             styleTheme.bg
           } ${styleTheme.border} ${styleTheme.text} ${
             isSelected

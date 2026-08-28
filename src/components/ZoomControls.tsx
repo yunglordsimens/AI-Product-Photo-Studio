@@ -1,5 +1,5 @@
 import React from 'react';
-import { ZoomIn, ZoomOut, Maximize, RotateCcw } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize } from 'lucide-react';
 
 interface ZoomControlsProps {
   zoom: number;
@@ -19,13 +19,14 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
   return (
     <div
       id="canvas-zoom-controls"
-      className="absolute bottom-6 right-6 flex items-center bg-white border border-gray-200 rounded-lg shadow-xl p-1 z-30 select-none"
+      className="absolute bottom-4 right-3 sm:bottom-6 sm:right-6 flex items-center bg-white/95 backdrop-blur-xs border border-gray-200 rounded-xl shadow-lg p-1 z-30 select-none touch-manipulation"
     >
       <button
         onClick={onZoomOut}
         id="btn-ctrl-zoom-out"
-        className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
-        title="Уменьшить (Ctrl + Колесо вниз)"
+        className="w-8 h-8 sm:w-8 sm:h-8 flex items-center justify-center text-gray-700 hover:text-gray-900 active:bg-gray-200 hover:bg-gray-100 rounded-lg transition-colors"
+        title="Уменьшить"
+        aria-label="Уменьшить"
       >
         <ZoomOut className="w-4 h-4" />
       </button>
@@ -35,8 +36,9 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
       <button
         onClick={onResetZoom}
         id="btn-ctrl-zoom-reset"
-        className="px-2.5 py-1 text-xs font-mono font-semibold text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded min-w-[50px] text-center transition-colors"
+        className="px-2 py-1 text-xs font-mono font-semibold text-gray-700 hover:text-gray-900 active:bg-gray-200 hover:bg-gray-100 rounded-md min-w-[46px] text-center transition-colors"
         title="Сбросить масштаб (100%)"
+        aria-label="Сбросить масштаб"
       >
         {Math.round(zoom * 100)}%
       </button>
@@ -46,8 +48,9 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
       <button
         onClick={onZoomIn}
         id="btn-ctrl-zoom-in"
-        className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
-        title="Увеличить (Ctrl + Колесо вверх)"
+        className="w-8 h-8 flex items-center justify-center text-gray-700 hover:text-gray-900 active:bg-gray-200 hover:bg-gray-100 rounded-lg transition-colors"
+        title="Увеличить"
+        aria-label="Увеличить"
       >
         <ZoomIn className="w-4 h-4" />
       </button>
@@ -57,8 +60,9 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
       <button
         onClick={onFitCards}
         id="btn-ctrl-fit-view"
-        className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
-        title="Показать все карточки на экране"
+        className="w-8 h-8 flex items-center justify-center text-gray-700 hover:text-gray-900 active:bg-gray-200 hover:bg-gray-100 rounded-lg transition-colors"
+        title="Показать все фото"
+        aria-label="Показать все фото"
       >
         <Maximize className="w-4 h-4" />
       </button>

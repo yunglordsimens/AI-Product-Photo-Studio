@@ -14,7 +14,6 @@ import {
   Copy,
   Trash2,
   Monitor,
-  Eye,
 } from 'lucide-react';
 
 interface CanvasProps {
@@ -92,7 +91,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Interaction states
+  // Mouse Interaction states
   const [isSpaceDown, setIsSpaceDown] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [isDraggingCards, setIsDraggingCards] = useState(false);
@@ -100,187 +99,128 @@ export const Canvas: React.FC<CanvasProps> = ({
   const [marquee, setMarquee] = useState<MarqueeBox | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  // Context Menu State
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-    visible: boolean;
-    groupId?: string;
-    cardId?: string;
-    isMockup?: boolean;
-  }>({ x: 0, y: 0, visible: false });
-
-  // Refs for tracking mouse drag deltas without stale closure issues
+  // Position tracking refs
   const lastMousePos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const isDraggingMockupRef = useRef(false);
-  const isResizingMockupRef = useRef(false);
-  const initialSelectedOnMarqueeStart = useRef<{ cards: Set<string>; notes: Set<string> }>({
+  const initialSelectedOnMarqueeStart = useRef<{
+    cards: Set<string>;
+    notes: Set<string>;
+  }>({
     cards: new Set(),
     notes: new Set(),
   });
 
-  // Screen coordinate to Canvas world coordinate conversion
+  // Synchronized state refs for 60fps glitch-free drag & drop
+  const cardsRef = useRef(project.cards || []);
+  cardsRef.current = project.cards || [];
+
+  const notesRef = useRef(project.notes || []);
+  notesRef.current = project.notes || [];
+
+  const panRef = useRef(pan);
+  panRef.current = pan;
+
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+
+  const selectedCardIdsRef = useRef(selectedCardIds);
+  selectedCardIdsRef.current = selectedCardIds;
+
+  const selectedNoteIdsRef = useRef(selectedNoteIds);
+  selectedNoteIdsRef.current = selectedNoteIds;
+
+  const draggedCardIdsRef = useRef<Set<string>>(new Set());
+  const draggedNoteIdsRef = useRef<Set<string>>(new Set());
+  const isDraggingCardsRef = useRef(false);
+  const isDraggingNotesRef = useRef(false);
+  const isPanningRef = useRef(false);
+
+  // Touch tracking refs
+  const touchStateRef = useRef<{
+    mode: 'idle' | 'pan' | 'pinch' | 'drag-card' | 'drag-note';
+    lastPos: { x: number; y: number };
+    startPos: { x: number; y: number };
+    initialPinchDist: number;
+    initialPinchZoom: number;
+    pinchCenter: { x: number; y: number };
+    cardId?: string;
+    noteId?: string;
+    lastTapTime?: number;
+  }>({
+    mode: 'idle',
+    lastPos: { x: 0, y: 0 },
+    startPos: { x: 0, y: 0 },
+    initialPinchDist: 0,
+    initialPinchZoom: 1,
+    pinchCenter: { x: 0, y: 0 },
+  });
+
+  // Dragging / Resizing Site Mockup refs
+  const isDraggingMockupRef = useRef(false);
+  const isResizingMockupRef = useRef(false);
+
+  // Context Menu State
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    cardId?: string;
+    groupId?: string;
+    isMockup?: boolean;
+  }>({ visible: false, x: 0, y: 0 });
+
+  // Coordinate Conversion: Screen -> Canvas World Space
   const screenToCanvas = useCallback(
     (screenX: number, screenY: number) => {
       if (!containerRef.current) return { x: 0, y: 0 };
       const rect = containerRef.current.getBoundingClientRect();
+      const clientX = screenX - rect.left;
+      const clientY = screenY - rect.top;
       return {
-        x: (screenX - rect.left - pan.x) / zoom,
-        y: (screenY - rect.top - pan.y) / zoom,
+        x: Math.round((clientX - pan.x) / zoom),
+        y: Math.round((clientY - pan.y) / zoom),
       };
     },
     [pan, zoom]
   );
 
-  // Close context menu on click anywhere outside
-  useEffect(() => {
-    const handleGlobalClick = () => {
-      if (contextMenu.visible) {
-        setContextMenu((prev) => ({ ...prev, visible: false }));
-      }
-    };
-    window.addEventListener('click', handleGlobalClick);
-    return () => window.removeEventListener('click', handleGlobalClick);
-  }, [contextMenu.visible]);
-
-  // Zoom handlers
-  const setZoomAroundPoint = useCallback(
-    (newZoom: number, mouseX?: number, mouseY?: number) => {
-      const clampedZoom = Math.min(4.0, Math.max(0.15, newZoom));
-      if (!containerRef.current) {
-        onUpdatePanZoom(pan, clampedZoom);
-        return;
-      }
-
-      const rect = containerRef.current.getBoundingClientRect();
-      const originX = mouseX !== undefined ? mouseX - rect.left : rect.width / 2;
-      const originY = mouseY !== undefined ? mouseY - rect.top : rect.height / 2;
-
-      const newPanX = originX - (originX - pan.x) * (clampedZoom / zoom);
-      const newPanY = originY - (originY - pan.y) * (clampedZoom / zoom);
-
-      onUpdatePanZoom({ x: newPanX, y: newPanY }, clampedZoom);
-    },
-    [pan, zoom, onUpdatePanZoom]
-  );
-
-  const handleZoomIn = () => setZoomAroundPoint(zoom * 1.25);
-  const handleZoomOut = () => setZoomAroundPoint(zoom / 1.25);
-  const handleResetZoom = () => {
-    onUpdatePanZoom({ x: 80, y: 80 }, 1);
-  };
-
-  const handleFitCards = () => {
-    const hasItems =
-      (project.cards && project.cards.length > 0) || (project.notes && project.notes.length > 0);
-    if (!hasItems || !containerRef.current) {
-      handleResetZoom();
-      return;
-    }
-
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-
-    (project.cards || []).forEach((c) => {
-      minX = Math.min(minX, c.x);
-      minY = Math.min(minY, c.y);
-      maxX = Math.max(maxX, c.x + c.width);
-      maxY = Math.max(maxY, c.y + (c.height || 300));
-    });
-
-    (project.notes || []).forEach((n) => {
-      minX = Math.min(minX, n.x);
-      minY = Math.min(minY, n.y);
-      maxX = Math.max(maxX, n.x + (n.width || 180));
-      maxY = Math.max(maxY, n.y + (n.height || 140));
-    });
-
-    const padding = 100;
-    const rect = containerRef.current.getBoundingClientRect();
-    const contentW = maxX - minX + padding * 2;
-    const contentH = maxY - minY + padding * 2;
-
-    const fitZoom = Math.min(
-      Math.max(0.2, Math.min(rect.width / contentW, rect.height / contentH)),
-      1.5
-    );
-
-    const fitPanX = rect.width / 2 - (minX + contentW / 2) * fitZoom + padding * fitZoom;
-    const fitPanY = rect.height / 2 - (minY + contentH / 2) * fitZoom + padding * fitZoom;
-
-    onUpdatePanZoom({ x: fitPanX, y: fitPanY }, fitZoom);
-  };
-
-  // Keyboard events
+  // Keyboard events: Space for panning, Delete/Backspace for removing selected items, Esc
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
       const isInput =
-        document.activeElement instanceof HTMLInputElement ||
-        document.activeElement instanceof HTMLTextAreaElement;
-      if (isInput) return;
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable;
 
-      if (e.code === 'Space' && !e.repeat) {
+      if (e.code === 'Space' && !isInput) {
         setIsSpaceDown(true);
       }
 
-      // Hotkey L: Toggle Connection Mode
-      if ((e.key === 'l' || e.key === 'L' || e.key === 'д' || e.key === 'Д') && !e.ctrlKey && !e.metaKey) {
-        if (onToggleConnectionMode) {
+      if (e.key === 'Escape') {
+        if (isConnectionMode && onToggleConnectionMode) {
           onToggleConnectionMode();
         }
-      }
-
-      // Hotkey G: Group cards if multiple selected
-      if ((e.key === 'g' || e.key === 'G' || e.key === 'п' || e.key === 'П') && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        if (onGroupSelected && selectedCardIds.size > 1) {
-          onGroupSelected();
+        if (connectingSourceCardId && onSetConnectingSourceCardId) {
+          onSetConnectingSourceCardId(null);
+        }
+        if (contextMenu.visible) {
+          setContextMenu((prev) => ({ ...prev, visible: false }));
         }
       }
 
-      // Delete selected cards, notes, or connection
-      if (e.key === 'Delete' || e.key === 'Backspace') {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !isInput) {
+        if (selectedCardIds.size > 0) {
+          selectedCardIds.forEach((id) => onDeleteCard(id));
+          onSelectCards(new Set());
+        }
+        if (selectedNoteIds.size > 0) {
+          selectedNoteIds.forEach((id) => onDeleteNote(id));
+          onSelectNotes(new Set());
+        }
         if (selectedConnectionId && onDeleteConnection) {
           onDeleteConnection(selectedConnectionId);
           if (onSelectConnection) onSelectConnection(null);
         }
-        if (selectedCardIds.size > 0) {
-          const remaining = (project.cards || []).filter((c) => !selectedCardIds.has(c.id));
-          onUpdateCards(remaining);
-          onSelectCards(new Set());
-        }
-        if (selectedNoteIds.size > 0) {
-          const remainingNotes = (project.notes || []).filter((n) => !selectedNoteIds.has(n.id));
-          onUpdateNotes(remainingNotes);
-          onSelectNotes(new Set());
-        }
-      }
-
-      // Select All (Ctrl+A / Cmd+A)
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-        e.preventDefault();
-        const allCardIds = new Set((project.cards || []).map((c) => c.id));
-        const allNoteIds = new Set((project.notes || []).map((n) => n.id));
-        onSelectCards(allCardIds);
-        onSelectNotes(allNoteIds);
-      }
-
-      // Deselect all (Escape)
-      if (e.key === 'Escape') {
-        if (connectingSourceCardId && onSetConnectingSourceCardId) {
-          onSetConnectingSourceCardId(null);
-        }
-        if (selectedConnectionId && onSelectConnection) {
-          onSelectConnection(null);
-        }
-        if (isConnectionMode && onToggleConnectionMode) {
-          onToggleConnectionMode();
-        }
-        setContextMenu((prev) => ({ ...prev, visible: false }));
-        onSelectCards(new Set());
-        onSelectNotes(new Set());
       }
     };
 
@@ -297,123 +237,155 @@ export const Canvas: React.FC<CanvasProps> = ({
       window.removeEventListener('keyup', handleKeyUp);
     };
   }, [
-    project.cards,
-    project.notes,
+    isConnectionMode,
+    connectingSourceCardId,
     selectedCardIds,
     selectedNoteIds,
     selectedConnectionId,
-    isConnectionMode,
-    connectingSourceCardId,
-    onUpdateCards,
-    onUpdateNotes,
+    contextMenu.visible,
+    onDeleteCard,
+    onDeleteNote,
+    onDeleteConnection,
     onSelectCards,
     onSelectNotes,
-    onToggleConnectionMode,
-    onSetConnectingSourceCardId,
-    onDeleteConnection,
     onSelectConnection,
-    onGroupSelected,
+    onSetConnectingSourceCardId,
+    onToggleConnectionMode,
   ]);
 
-  // Wheel zoom and pan
+  // Zoom Controls
+  const handleZoomIn = () => {
+    const nextZoom = Math.min(zoom * 1.25, 4.0);
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const newPan = {
+      x: cx - (cx - pan.x) * (nextZoom / zoom),
+      y: cy - (cy - pan.y) * (nextZoom / zoom),
+    };
+    onUpdatePanZoom(newPan, nextZoom);
+  };
+
+  const handleZoomOut = () => {
+    const nextZoom = Math.max(zoom / 1.25, 0.1);
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const newPan = {
+      x: cx - (cx - pan.x) * (nextZoom / zoom),
+      y: cy - (cy - pan.y) * (nextZoom / zoom),
+    };
+    onUpdatePanZoom(newPan, nextZoom);
+  };
+
+  const handleResetZoom = () => {
+    onUpdatePanZoom({ x: 0, y: 0 }, 1.0);
+  };
+
+  const handleFitCards = () => {
+    const allCards = project.cards || [];
+    const allNotes = project.notes || [];
+    if (allCards.length === 0 && allNotes.length === 0) {
+      handleResetZoom();
+      return;
+    }
+    if (!containerRef.current) return;
+
+    const xs = [
+      ...allCards.map((c) => c.x),
+      ...allCards.map((c) => c.x + c.width),
+      ...allNotes.map((n) => n.x),
+      ...allNotes.map((n) => n.x + (n.width || 180)),
+    ];
+    const ys = [
+      ...allCards.map((c) => c.y),
+      ...allCards.map((c) => c.y + (c.height || 300)),
+      ...allNotes.map((n) => n.y),
+      ...allNotes.map((n) => n.y + (n.height || 140)),
+    ];
+
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+
+    const boundingW = maxX - minX;
+    const boundingH = maxY - minY;
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const padding = 80;
+    const targetW = rect.width - padding * 2;
+    const targetH = rect.height - padding * 2;
+
+    const scale = Math.min(targetW / boundingW, targetH / boundingH, 1.2);
+    const finalZoom = Math.max(0.15, Math.min(scale, 2.0));
+
+    const centerX = minX + boundingW / 2;
+    const centerY = minY + boundingH / 2;
+
+    const newPan = {
+      x: rect.width / 2 - centerX * finalZoom,
+      y: rect.height / 2 - centerY * finalZoom,
+    };
+
+    onUpdatePanZoom(newPan, finalZoom);
+  };
+
+  // Wheel handler: Panning and Zooming with cursor focus
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    if (e.ctrlKey || e.metaKey || e.altKey) {
-      // Smooth exponential zoom for wheel or pinch
-      const factor = e.deltaY < 0 ? 1.1 : 0.9;
-      setZoomAroundPoint(zoom * factor, e.clientX, e.clientY);
-    } else if (e.shiftKey) {
-      // Horizontal scroll with Shift+Wheel
-      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-      onUpdatePanZoom(
-        {
-          x: pan.x - delta,
-          y: pan.y,
-        },
-        zoom
-      );
+    if (!containerRef.current) return;
+
+    if (e.ctrlKey || e.metaKey) {
+      const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
+      const nextZoom = Math.max(0.1, Math.min(zoom * zoomFactor, 4.0));
+
+      const rect = containerRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const newPan = {
+        x: mouseX - (mouseX - pan.x) * (nextZoom / zoom),
+        y: mouseY - (mouseY - pan.y) * (nextZoom / zoom),
+      };
+
+      onUpdatePanZoom(newPan, nextZoom);
     } else {
-      // Standard 2D pan with trackpad or mouse wheel
-      onUpdatePanZoom(
-        {
-          x: pan.x - e.deltaX,
-          y: pan.y - e.deltaY,
-        },
-        zoom
-      );
+      onUpdatePanZoom({ x: pan.x - e.deltaX, y: pan.y - e.deltaY }, zoom);
     }
   };
 
-  // Double click on canvas to create note
+  // Double click canvas to create sticky note
   const handleCanvasDoubleClick = (e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (
-      target.closest('.group') ||
-      target.closest('[id^="card-node-"]') ||
-      target.closest('[id^="note-node-"]') ||
-      target.closest('[id^="group-box-"]') ||
-      target.closest('button') ||
-      target.closest('textarea')
-    ) {
+    if (e.target !== containerRef.current && (e.target as HTMLElement).id !== 'canvas-grid-background') {
       return;
     }
-
-    const pos = screenToCanvas(e.clientX, e.clientY);
+    const world = screenToCanvas(e.clientX, e.clientY);
     const newNote: Note = {
       id: `note_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-      x: Math.round(pos.x - 90),
-      y: Math.round(pos.y - 70),
+      x: world.x,
+      y: world.y,
       width: 180,
       height: 140,
       text: '',
       color: 'yellow',
       attachedTo: null,
-      projectId: project.id,
     };
-
-    // Check if double click landed directly on top of a card
-    const cards = project.cards || [];
-    for (let i = cards.length - 1; i >= 0; i--) {
-      const c = cards[i];
-      const ch = c.height || 300;
-      if (pos.x >= c.x && pos.x <= c.x + c.width && pos.y >= c.y && pos.y <= c.y + ch) {
-        newNote.attachedTo = c.id;
-        break;
-      }
-    }
-
     onAddNote(newNote);
     onSelectNotes(new Set([newNote.id]));
     onSelectCards(new Set());
   };
 
-  // Right click / Context menu handler
+  // Context Menu on Canvas
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
-    const target = e.target as HTMLElement;
-    const cardEl = target.closest('[id^="card-node-"]');
-    const groupEl = target.closest('[id^="group-box-"]');
-
-    let cardId: string | undefined;
-    let groupId: string | undefined;
-
-    if (cardEl) {
-      cardId = cardEl.id.replace('card-node-', '');
-      if (!selectedCardIds.has(cardId)) {
-        onSelectCards(new Set([cardId]));
-      }
-    }
-
-    if (groupEl) {
-      groupId = groupEl.id.replace('group-box-', '');
-    }
-
     setContextMenu({
+      visible: true,
       x: e.clientX,
       y: e.clientY,
-      visible: true,
-      cardId,
-      groupId,
+      isMockup: Boolean(project.siteMockup),
     });
   };
 
@@ -424,6 +396,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
 
     if (e.button === 1 || (e.button === 0 && isSpaceDown)) {
+      isPanningRef.current = true;
       setIsPanning(true);
       lastMousePos.current = { x: e.clientX, y: e.clientY };
       return;
@@ -440,11 +413,13 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (!e.shiftKey) {
         onSelectCards(new Set());
         onSelectNotes(new Set());
+        selectedCardIdsRef.current = new Set();
+        selectedNoteIdsRef.current = new Set();
         initialSelectedOnMarqueeStart.current = { cards: new Set(), notes: new Set() };
       } else {
         initialSelectedOnMarqueeStart.current = {
-          cards: new Set(selectedCardIds),
-          notes: new Set(selectedNoteIds),
+          cards: new Set(selectedCardIdsRef.current),
+          notes: new Set(selectedNoteIdsRef.current),
         };
       }
 
@@ -465,6 +440,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     (e: React.MouseEvent, cardId: string) => {
       if (isSpaceDown || e.button !== 0) return;
       e.stopPropagation();
+      e.preventDefault();
 
       if (isConnectionMode) {
         if (onSelectConnection) onSelectConnection(null);
@@ -479,20 +455,22 @@ export const Canvas: React.FC<CanvasProps> = ({
         return;
       }
 
-      const newSelection = new Set(selectedCardIds);
-
-      // If this card is part of a group and not currently selected with shift, select all cards in the group
+      let newSelection: Set<string>;
+      const currentSelected = selectedCardIdsRef.current;
       const parentGroup = (project.groups || []).find((g) => g.children.includes(cardId));
 
       if (e.shiftKey) {
+        newSelection = new Set(currentSelected);
         if (newSelection.has(cardId)) {
           newSelection.delete(cardId);
         } else {
           newSelection.add(cardId);
         }
       } else {
-        if (!newSelection.has(cardId)) {
-          newSelection.clear();
+        if (currentSelected.has(cardId)) {
+          newSelection = new Set(currentSelected);
+        } else {
+          newSelection = new Set();
           if (parentGroup) {
             parentGroup.children.forEach((cid) => newSelection.add(cid));
           } else {
@@ -500,12 +478,16 @@ export const Canvas: React.FC<CanvasProps> = ({
           }
         }
         onSelectNotes(new Set());
+        selectedNoteIdsRef.current = new Set();
       }
 
       if (onSelectConnection) onSelectConnection(null);
       onSelectCards(newSelection);
+      selectedCardIdsRef.current = newSelection;
 
       // Start dragging cards + attached notes
+      draggedCardIdsRef.current = new Set(newSelection);
+      isDraggingCardsRef.current = true;
       setIsDraggingCards(true);
       lastMousePos.current = { x: e.clientX, y: e.clientY };
     },
@@ -513,7 +495,6 @@ export const Canvas: React.FC<CanvasProps> = ({
       isSpaceDown,
       isConnectionMode,
       connectingSourceCardId,
-      selectedCardIds,
       project.groups,
       onSelectCards,
       onSelectNotes,
@@ -528,12 +509,17 @@ export const Canvas: React.FC<CanvasProps> = ({
     (e: React.MouseEvent, group: CardGroup) => {
       if (isSpaceDown || e.button !== 0) return;
       e.stopPropagation();
+      e.preventDefault();
 
       const memberIds = new Set(group.children);
       onSelectCards(memberIds);
       onSelectNotes(new Set());
+      selectedCardIdsRef.current = memberIds;
+      selectedNoteIdsRef.current = new Set();
       if (onSelectConnection) onSelectConnection(null);
 
+      draggedCardIdsRef.current = memberIds;
+      isDraggingCardsRef.current = true;
       setIsDraggingCards(true);
       lastMousePos.current = { x: e.clientX, y: e.clientY };
     },
@@ -545,33 +531,40 @@ export const Canvas: React.FC<CanvasProps> = ({
     (e: React.MouseEvent, noteId: string) => {
       if (isSpaceDown || e.button !== 0) return;
       e.stopPropagation();
+      e.preventDefault();
 
-      const newSelection = new Set(selectedNoteIds);
+      let newSelection: Set<string>;
+      const currentSelected = selectedNoteIdsRef.current;
 
       if (e.shiftKey) {
+        newSelection = new Set(currentSelected);
         if (newSelection.has(noteId)) {
           newSelection.delete(noteId);
         } else {
           newSelection.add(noteId);
         }
       } else {
-        if (!newSelection.has(noteId)) {
-          newSelection.clear();
-          newSelection.add(noteId);
+        if (currentSelected.has(noteId)) {
+          newSelection = new Set(currentSelected);
+        } else {
+          newSelection = new Set([noteId]);
         }
         onSelectCards(new Set());
+        selectedCardIdsRef.current = new Set();
       }
 
       onSelectNotes(newSelection);
+      selectedNoteIdsRef.current = newSelection;
 
-      // Start dragging notes
+      draggedNoteIdsRef.current = new Set(newSelection);
+      isDraggingNotesRef.current = true;
       setIsDraggingNotes(true);
       lastMousePos.current = { x: e.clientX, y: e.clientY };
     },
-    [isSpaceDown, selectedNoteIds, onSelectNotes, onSelectCards]
+    [isSpaceDown, onSelectNotes, onSelectCards]
   );
 
-  // Mouse down on Site Mockup Layer (for moving)
+  // Site Mockup Mouse Down
   const handleSiteMockupMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (isSpaceDown || e.button !== 0) return;
@@ -606,7 +599,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     [isSpaceDown, project.siteMockup, zoom, onUpdateSiteMockup]
   );
 
-  // Mouse down on Site Mockup Resize Handle
   const handleSiteMockupResizeMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button !== 0) return;
@@ -651,20 +643,23 @@ export const Canvas: React.FC<CanvasProps> = ({
       const dy = e.clientY - lastMousePos.current.y;
 
       // Panning canvas
-      if (isPanning) {
-        onUpdatePanZoom({ x: pan.x + dx, y: pan.y + dy }, zoom);
+      if (isPanningRef.current) {
+        const curPan = panRef.current;
+        const curZoom = zoomRef.current;
+        onUpdatePanZoom({ x: curPan.x + dx, y: curPan.y + dy }, curZoom);
         lastMousePos.current = { x: e.clientX, y: e.clientY };
         return;
       }
 
-      // Dragging cards (and attached notes move along!)
-      if (isDraggingCards) {
-        const worldDx = dx / zoom;
-        const worldDy = dy / zoom;
+      // Dragging cards (and attached notes move along)
+      if (isDraggingCardsRef.current) {
+        const curZoom = zoomRef.current || 1;
+        const worldDx = dx / curZoom;
+        const worldDy = dy / curZoom;
+        const activeIds = draggedCardIdsRef.current;
 
-        // Move selected cards
-        const updatedCards = (project.cards || []).map((c) => {
-          if (selectedCardIds.has(c.id)) {
+        const updatedCards = cardsRef.current.map((c) => {
+          if (activeIds.has(c.id)) {
             return {
               ...c,
               x: Math.round(c.x + worldDx),
@@ -674,9 +669,13 @@ export const Canvas: React.FC<CanvasProps> = ({
           return c;
         });
 
-        // Also move all notes attached to any moved card!
-        const updatedNotes = (project.notes || []).map((n) => {
-          if (n.attachedTo && selectedCardIds.has(n.attachedTo)) {
+        cardsRef.current = updatedCards;
+        onUpdateCards(updatedCards);
+
+        let hasNotesChanged = false;
+        const updatedNotes = notesRef.current.map((n) => {
+          if (n.attachedTo && activeIds.has(n.attachedTo)) {
+            hasNotesChanged = true;
             return {
               ...n,
               x: Math.round(n.x + worldDx),
@@ -686,19 +685,24 @@ export const Canvas: React.FC<CanvasProps> = ({
           return n;
         });
 
-        onUpdateCards(updatedCards);
-        onUpdateNotes(updatedNotes);
+        if (hasNotesChanged) {
+          notesRef.current = updatedNotes;
+          onUpdateNotes(updatedNotes);
+        }
+
         lastMousePos.current = { x: e.clientX, y: e.clientY };
         return;
       }
 
       // Dragging notes
-      if (isDraggingNotes) {
-        const worldDx = dx / zoom;
-        const worldDy = dy / zoom;
+      if (isDraggingNotesRef.current) {
+        const curZoom = zoomRef.current || 1;
+        const worldDx = dx / curZoom;
+        const worldDy = dy / curZoom;
+        const activeIds = draggedNoteIdsRef.current;
 
-        const updatedNotes = (project.notes || []).map((n) => {
-          if (selectedNoteIds.has(n.id)) {
+        const updatedNotes = notesRef.current.map((n) => {
+          if (activeIds.has(n.id)) {
             return {
               ...n,
               x: Math.round(n.x + worldDx),
@@ -708,6 +712,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           return n;
         });
 
+        notesRef.current = updatedNotes;
         onUpdateNotes(updatedNotes);
         lastMousePos.current = { x: e.clientX, y: e.clientY };
         return;
@@ -737,7 +742,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         const newSelectedCards = new Set(initialSelectedOnMarqueeStart.current.cards);
         const newSelectedNotes = new Set(initialSelectedOnMarqueeStart.current.notes);
 
-        (project.cards || []).forEach((c) => {
+        cardsRef.current.forEach((c) => {
           const cardRight = c.x + c.width;
           const cardBottom = c.y + (c.height || 300);
           const intersects = !(
@@ -749,7 +754,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           if (intersects) newSelectedCards.add(c.id);
         });
 
-        (project.notes || []).forEach((n) => {
+        notesRef.current.forEach((n) => {
           const noteRight = n.x + (n.width || 180);
           const noteBottom = n.y + (n.height || 140);
           const intersects = !(
@@ -761,12 +766,17 @@ export const Canvas: React.FC<CanvasProps> = ({
           if (intersects) newSelectedNotes.add(n.id);
         });
 
+        selectedCardIdsRef.current = newSelectedCards;
+        selectedNoteIdsRef.current = newSelectedNotes;
         onSelectCards(newSelectedCards);
         onSelectNotes(newSelectedNotes);
       }
     };
 
     const handleMouseUp = () => {
+      isPanningRef.current = false;
+      isDraggingCardsRef.current = false;
+      isDraggingNotesRef.current = false;
       setIsPanning(false);
       setIsDraggingCards(false);
       setIsDraggingNotes(false);
@@ -780,16 +790,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [
-    isPanning,
-    isDraggingCards,
-    isDraggingNotes,
     marquee,
-    pan,
-    zoom,
-    selectedCardIds,
-    selectedNoteIds,
-    project.cards,
-    project.notes,
     onUpdatePanZoom,
     onUpdateCards,
     onUpdateNotes,
@@ -798,7 +799,324 @@ export const Canvas: React.FC<CanvasProps> = ({
     screenToCanvas,
   ]);
 
-  // Drag & Drop external image files onto canvas
+  // ==========================================
+  // TOUCH GESTURE HANDLERS (Mobile / Tablet)
+  // ==========================================
+
+  // Card Touch Start
+  const handleCardTouchStart = useCallback(
+    (e: React.TouchEvent, cardId: string) => {
+      if (e.touches.length > 1) return;
+      e.stopPropagation();
+
+      const touch = e.touches[0];
+      const now = Date.now();
+
+      if (isConnectionMode) {
+        if (onSelectConnection) onSelectConnection(null);
+        if (!connectingSourceCardId) {
+          if (onSetConnectingSourceCardId) onSetConnectingSourceCardId(cardId);
+        } else if (connectingSourceCardId === cardId) {
+          if (onSetConnectingSourceCardId) onSetConnectingSourceCardId(null);
+        } else {
+          if (onAddConnection) onAddConnection(connectingSourceCardId, cardId);
+          if (onSetConnectingSourceCardId) onSetConnectingSourceCardId(null);
+        }
+        return;
+      }
+
+      let newSelection: Set<string>;
+      const currentSelected = selectedCardIdsRef.current;
+      const parentGroup = (project.groups || []).find((g) => g.children.includes(cardId));
+
+      if (currentSelected.has(cardId)) {
+        newSelection = new Set(currentSelected);
+      } else {
+        newSelection = new Set();
+        if (parentGroup) {
+          parentGroup.children.forEach((cid) => newSelection.add(cid));
+        } else {
+          newSelection.add(cardId);
+        }
+      }
+
+      onSelectCards(newSelection);
+      onSelectNotes(new Set());
+      selectedCardIdsRef.current = newSelection;
+      selectedNoteIdsRef.current = new Set();
+      if (onSelectConnection) onSelectConnection(null);
+
+      draggedCardIdsRef.current = new Set(newSelection);
+      isDraggingCardsRef.current = true;
+
+      touchStateRef.current = {
+        mode: 'drag-card',
+        lastPos: { x: touch.clientX, y: touch.clientY },
+        startPos: { x: touch.clientX, y: touch.clientY },
+        initialPinchDist: 0,
+        initialPinchZoom: zoomRef.current,
+        pinchCenter: { x: touch.clientX, y: touch.clientY },
+        cardId,
+        lastTapTime: now,
+      };
+      lastMousePos.current = { x: touch.clientX, y: touch.clientY };
+    },
+    [
+      isConnectionMode,
+      connectingSourceCardId,
+      project.groups,
+      onSelectCards,
+      onSelectNotes,
+      onSelectConnection,
+      onSetConnectingSourceCardId,
+      onAddConnection,
+    ]
+  );
+
+  // Note Touch Start
+  const handleNoteTouchStart = useCallback(
+    (e: React.TouchEvent, noteId: string) => {
+      if (e.touches.length > 1) return;
+      e.stopPropagation();
+
+      const touch = e.touches[0];
+      const now = Date.now();
+
+      let newSelection: Set<string>;
+      const currentSelected = selectedNoteIdsRef.current;
+      if (currentSelected.has(noteId)) {
+        newSelection = new Set(currentSelected);
+      } else {
+        newSelection = new Set([noteId]);
+      }
+
+      onSelectNotes(newSelection);
+      onSelectCards(new Set());
+      selectedNoteIdsRef.current = newSelection;
+      selectedCardIdsRef.current = new Set();
+
+      draggedNoteIdsRef.current = new Set(newSelection);
+      isDraggingNotesRef.current = true;
+
+      touchStateRef.current = {
+        mode: 'drag-note',
+        lastPos: { x: touch.clientX, y: touch.clientY },
+        startPos: { x: touch.clientX, y: touch.clientY },
+        initialPinchDist: 0,
+        initialPinchZoom: zoomRef.current,
+        pinchCenter: { x: touch.clientX, y: touch.clientY },
+        noteId,
+        lastTapTime: now,
+      };
+      lastMousePos.current = { x: touch.clientX, y: touch.clientY };
+    },
+    [onSelectNotes, onSelectCards]
+  );
+
+  // Canvas Touch Start
+  const handleCanvasTouchStart = (e: React.TouchEvent) => {
+    if (contextMenu.visible) {
+      setContextMenu((prev) => ({ ...prev, visible: false }));
+    }
+
+    if (e.touches.length === 2) {
+      // Pinch to Zoom start
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const centerX = (t1.clientX + t2.clientX) / 2;
+      const centerY = (t1.clientY + t2.clientY) / 2;
+
+      touchStateRef.current = {
+        mode: 'pinch',
+        lastPos: { x: centerX, y: centerY },
+        startPos: { x: centerX, y: centerY },
+        initialPinchDist: dist || 1,
+        initialPinchZoom: zoomRef.current,
+        pinchCenter: { x: centerX, y: centerY },
+      };
+      return;
+    }
+
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const now = Date.now();
+      const lastTap = touchStateRef.current.lastTapTime || 0;
+
+      // Detect double tap on canvas background -> create note
+      if (now - lastTap < 300) {
+        const world = screenToCanvas(touch.clientX, touch.clientY);
+        const newNote: Note = {
+          id: `note_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+          x: world.x,
+          y: world.y,
+          width: 180,
+          height: 140,
+          text: '',
+          color: 'yellow',
+          attachedTo: null,
+        };
+        onAddNote(newNote);
+        onSelectNotes(new Set([newNote.id]));
+        onSelectCards(new Set());
+        selectedNoteIdsRef.current = new Set([newNote.id]);
+        selectedCardIdsRef.current = new Set();
+        touchStateRef.current.mode = 'idle';
+        return;
+      }
+
+      // Single touch on canvas -> pan canvas
+      isPanningRef.current = true;
+      touchStateRef.current = {
+        mode: 'pan',
+        lastPos: { x: touch.clientX, y: touch.clientY },
+        startPos: { x: touch.clientX, y: touch.clientY },
+        initialPinchDist: 0,
+        initialPinchZoom: zoomRef.current,
+        pinchCenter: { x: touch.clientX, y: touch.clientY },
+        lastTapTime: now,
+      };
+
+      if (!isConnectionMode) {
+        onSelectCards(new Set());
+        onSelectNotes(new Set());
+        selectedCardIdsRef.current = new Set();
+        selectedNoteIdsRef.current = new Set();
+      }
+    }
+  };
+
+  // Canvas Touch Move
+  const handleCanvasTouchMove = (e: React.TouchEvent) => {
+    // 2 touches: Pinch Zoom & Pan
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const currentCenterX = (t1.clientX + t2.clientX) / 2;
+      const currentCenterY = (t1.clientY + t2.clientY) / 2;
+
+      const { initialPinchDist, initialPinchZoom, pinchCenter } = touchStateRef.current;
+      if (initialPinchDist > 0 && containerRef.current) {
+        const scaleFactor = dist / initialPinchDist;
+        const nextZoom = Math.max(0.1, Math.min(initialPinchZoom * scaleFactor, 4.0));
+
+        const rect = containerRef.current.getBoundingClientRect();
+        const focusX = pinchCenter.x - rect.left;
+        const focusY = pinchCenter.y - rect.top;
+
+        const panDx = currentCenterX - touchStateRef.current.lastPos.x;
+        const panDy = currentCenterY - touchStateRef.current.lastPos.y;
+
+        const curPan = panRef.current;
+        const curZoom = zoomRef.current;
+        const newPan = {
+          x: focusX - (focusX - curPan.x) * (nextZoom / curZoom) + panDx,
+          y: focusY - (focusY - curPan.y) * (nextZoom / curZoom) + panDy,
+        };
+
+        onUpdatePanZoom(newPan, nextZoom);
+        touchStateRef.current.lastPos = { x: currentCenterX, y: currentCenterY };
+      }
+      return;
+    }
+
+    // 1 touch: Pan Canvas OR Drag Cards / Notes
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const dx = touch.clientX - touchStateRef.current.lastPos.x;
+      const dy = touch.clientY - touchStateRef.current.lastPos.y;
+
+      if (touchStateRef.current.mode === 'pan' || isPanningRef.current) {
+        e.preventDefault();
+        const curPan = panRef.current;
+        const curZoom = zoomRef.current;
+        onUpdatePanZoom({ x: curPan.x + dx, y: curPan.y + dy }, curZoom);
+        touchStateRef.current.lastPos = { x: touch.clientX, y: touch.clientY };
+        return;
+      }
+
+      if (touchStateRef.current.mode === 'drag-card' || isDraggingCardsRef.current) {
+        e.preventDefault();
+        const curZoom = zoomRef.current || 1;
+        const worldDx = dx / curZoom;
+        const worldDy = dy / curZoom;
+        const activeIds = draggedCardIdsRef.current;
+
+        const updatedCards = cardsRef.current.map((c) => {
+          if (activeIds.has(c.id)) {
+            return {
+              ...c,
+              x: Math.round(c.x + worldDx),
+              y: Math.round(c.y + worldDy),
+            };
+          }
+          return c;
+        });
+
+        cardsRef.current = updatedCards;
+        onUpdateCards(updatedCards);
+
+        let hasNotesChanged = false;
+        const updatedNotes = notesRef.current.map((n) => {
+          if (n.attachedTo && activeIds.has(n.attachedTo)) {
+            hasNotesChanged = true;
+            return {
+              ...n,
+              x: Math.round(n.x + worldDx),
+              y: Math.round(n.y + worldDy),
+            };
+          }
+          return n;
+        });
+
+        if (hasNotesChanged) {
+          notesRef.current = updatedNotes;
+          onUpdateNotes(updatedNotes);
+        }
+
+        touchStateRef.current.lastPos = { x: touch.clientX, y: touch.clientY };
+        return;
+      }
+
+      if (touchStateRef.current.mode === 'drag-note' || isDraggingNotesRef.current) {
+        e.preventDefault();
+        const curZoom = zoomRef.current || 1;
+        const worldDx = dx / curZoom;
+        const worldDy = dy / curZoom;
+        const activeIds = draggedNoteIdsRef.current;
+
+        const updatedNotes = notesRef.current.map((n) => {
+          if (activeIds.has(n.id)) {
+            return {
+              ...n,
+              x: Math.round(n.x + worldDx),
+              y: Math.round(n.y + worldDy),
+            };
+          }
+          return n;
+        });
+
+        notesRef.current = updatedNotes;
+        onUpdateNotes(updatedNotes);
+        touchStateRef.current.lastPos = { x: touch.clientX, y: touch.clientY };
+      }
+    }
+  };
+
+  // Canvas Touch End / Cancel
+  const handleCanvasTouchEnd = () => {
+    touchStateRef.current.mode = 'idle';
+    isDraggingCardsRef.current = false;
+    isDraggingNotesRef.current = false;
+    isPanningRef.current = false;
+    setIsDraggingCards(false);
+    setIsDraggingNotes(false);
+    setIsPanning(false);
+  };
+
+  // External Drag & Drop
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     if (!isDragOver) setIsDragOver(true);
@@ -821,7 +1139,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
   };
 
-  // Find existing group for active context
   const activeGroup = useMemo(() => {
     if (contextMenu.groupId) {
       return (project.groups || []).find((g) => g.id === contextMenu.groupId);
@@ -834,7 +1151,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     return undefined;
   }, [contextMenu.groupId, selectedCardIds, project.groups]);
 
-  // Calculated marquee rect in screen coords
   const marqueeStyle = marquee
     ? {
         left: Math.min(marquee.startX, marquee.currentX),
@@ -844,7 +1160,6 @@ export const Canvas: React.FC<CanvasProps> = ({
       }
     : null;
 
-  // Map cards for note attached lookups and connections
   const cardMap = useMemo(() => {
     const map = new Map<string, Card>();
     (project.cards || []).forEach((c) => map.set(c.id, c));
@@ -856,6 +1171,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       ref={containerRef}
       id="main-canvas-container"
       tabIndex={0}
+      style={{ touchAction: 'none' }}
       className={`relative flex-1 w-full h-full overflow-hidden bg-gray-50/50 select-none outline-none ${
         isSpaceDown
           ? isPanning
@@ -869,6 +1185,10 @@ export const Canvas: React.FC<CanvasProps> = ({
       onMouseDown={handleCanvasMouseDown}
       onDoubleClick={handleCanvasDoubleClick}
       onContextMenu={handleContextMenu}
+      onTouchStart={handleCanvasTouchStart}
+      onTouchMove={handleCanvasTouchMove}
+      onTouchEnd={handleCanvasTouchEnd}
+      onTouchCancel={handleCanvasTouchEnd}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -894,7 +1214,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         }}
         className="absolute inset-0 pointer-events-none"
       >
-        {/* Site Mockup Background Layer (rendered underneath groups and cards) */}
+        {/* Site Mockup Background Layer */}
         {project.siteMockup && (
           <div
             id="canvas-site-mockup-layer"
@@ -902,42 +1222,31 @@ export const Canvas: React.FC<CanvasProps> = ({
               transform: `translate3d(${project.siteMockup.x}px, ${project.siteMockup.y}px, 0)`,
               width: `${project.siteMockup.width || 960}px`,
               height: `${project.siteMockup.height || 640}px`,
-              opacity: project.siteMockup.opacity ?? 0.5,
               zIndex: 2,
             }}
-            className="absolute pointer-events-auto select-none rounded-xl border-2 border-dashed border-teal-400/80 bg-white/40 shadow-xl overflow-hidden group/mockup"
+            className="absolute top-0 left-0 bg-white/90 border-2 border-teal-500/40 rounded-xl shadow-2xl overflow-hidden pointer-events-auto group/mockup select-none"
             onMouseDown={handleSiteMockupMouseDown}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setContextMenu({
-                x: e.clientX,
-                y: e.clientY,
-                visible: true,
-                isMockup: true,
-              });
-            }}
           >
-            {/* Mockup Image */}
-            <img
-              src={project.siteMockup.src}
-              alt="Site Mockup"
-              className="w-full h-full object-cover pointer-events-none"
-            />
-
-            {/* Top Header Tag with Controls */}
             <div
-              className="absolute top-2 left-2 z-10 flex items-center gap-1.5 bg-slate-900/85 backdrop-blur-xs text-white text-[11px] font-medium px-2.5 py-1 rounded-lg shadow-md cursor-move opacity-90 group-hover/mockup:opacity-100 transition-opacity select-none"
-              onMouseDown={handleSiteMockupMouseDown}
+              className="absolute inset-0 pointer-events-none"
+              style={{ opacity: project.siteMockup.opacity ?? 0.5 }}
             >
-              <Monitor className="w-3.5 h-3.5 text-teal-400" />
-              <span>Мокап сайта</span>
-              <span className="text-[10px] text-teal-300 font-mono">
-                {Math.round((project.siteMockup.opacity ?? 0.5) * 100)}%
-              </span>
+              <img
+                src={project.siteMockup.src}
+                alt="Site Mockup"
+                className="w-full h-full object-contain pointer-events-none"
+                draggable={false}
+              />
+            </div>
 
-              {/* Opacity buttons */}
-              <div className="flex items-center gap-0.5 ml-1 bg-white/10 rounded px-1 py-0.5">
+            {/* Mockup Toolbar Header */}
+            <div className="absolute top-2 left-2 right-2 flex items-center justify-between bg-teal-900/80 backdrop-blur-xs text-white px-2.5 py-1 rounded-lg text-xs opacity-0 group-hover/mockup:opacity-100 transition-opacity z-10">
+              <div className="flex items-center gap-1.5 font-medium text-[11px]">
+                <Monitor className="w-3.5 h-3.5 text-teal-300" />
+                <span>Фоновый макет сайта</span>
+              </div>
+
+              <div className="flex items-center gap-1">
                 {[0.2, 0.5, 0.8, 1.0].map((op) => (
                   <button
                     key={op}
@@ -946,31 +1255,30 @@ export const Canvas: React.FC<CanvasProps> = ({
                       e.stopPropagation();
                       if (onChangeSiteMockupOpacity) onChangeSiteMockupOpacity(op);
                     }}
-                    className={`px-1 rounded text-[9px] hover:bg-white/30 transition-colors cursor-pointer ${
+                    className={`px-1.5 py-0.5 rounded text-[10px] transition-colors cursor-pointer ${
                       Math.abs((project.siteMockup?.opacity ?? 0.5) - op) < 0.05
                         ? 'bg-teal-500 text-white font-bold'
-                        : 'text-white/80'
+                        : 'text-white/80 hover:text-white'
                     }`}
                   >
                     {Math.round(op * 100)}%
                   </button>
                 ))}
-              </div>
 
-              {/* Delete Mockup */}
-              {onDeleteSiteMockup && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteSiteMockup();
-                  }}
-                  className="ml-1 hover:bg-red-500/80 p-0.5 rounded text-white/80 hover:text-white transition-colors cursor-pointer"
-                  title="Удалить фон сайта"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              )}
+                {onDeleteSiteMockup && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteSiteMockup();
+                    }}
+                    className="ml-1 hover:bg-red-500/80 p-0.5 rounded text-white/80 hover:text-white transition-colors cursor-pointer"
+                    title="Удалить фон сайта"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Resize Handle at bottom right */}
@@ -991,7 +1299,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           </div>
         )}
 
-        {/* Render Groups (behind cards) */}
+        {/* Render Groups */}
         {project.groups?.map((group) => {
           const memberCards = (project.cards || []).filter((c) =>
             group.children.includes(c.id)
@@ -1019,7 +1327,6 @@ export const Canvas: React.FC<CanvasProps> = ({
               className="absolute rounded-2xl border-2 border-dashed border-indigo-400/80 pointer-events-auto transition-all hover:border-indigo-600 hover:bg-indigo-500/15 cursor-grab active:cursor-grabbing group/grp select-none shadow-xs"
               onMouseDown={(e) => handleGroupMouseDown(e, group)}
             >
-              {/* Group Header Tag */}
               <div className="absolute -top-7 left-2 flex items-center gap-1.5 bg-indigo-600 text-white text-[11px] font-medium px-2.5 py-1 rounded-lg shadow-sm select-none">
                 <Layers className="w-3 h-3" />
                 <span>{group.name || 'Группа'}</span>
@@ -1096,7 +1403,6 @@ export const Canvas: React.FC<CanvasProps> = ({
 
             return (
               <g key={conn.id} className="group pointer-events-auto">
-                {/* Clickable invisible hit area for easy selection */}
                 <path
                   d={d}
                   stroke="transparent"
@@ -1111,7 +1417,6 @@ export const Canvas: React.FC<CanvasProps> = ({
                   }}
                 />
 
-                {/* Selection outer glow */}
                 {isConnSelected && (
                   <path
                     d={d}
@@ -1122,7 +1427,6 @@ export const Canvas: React.FC<CanvasProps> = ({
                   />
                 )}
 
-                {/* Visual Connection line */}
                 <path
                   d={d}
                   stroke={isConnSelected ? '#ef4444' : '#3b82f6'}
@@ -1139,11 +1443,9 @@ export const Canvas: React.FC<CanvasProps> = ({
                   }}
                 />
 
-                {/* Node endpoints */}
                 <circle cx={x1} cy={y1} r={4.5} fill={isConnSelected ? '#ef4444' : '#2563eb'} />
                 <circle cx={x2} cy={y2} r={4.5} fill={isConnSelected ? '#ef4444' : '#2563eb'} />
 
-                {/* Midpoint delete badge */}
                 <g
                   transform={`translate(${midX}, ${midY})`}
                   className={`cursor-pointer transition-opacity ${
@@ -1174,6 +1476,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             isConnectingSource={connectingSourceCardId === card.id}
             isConnectionMode={isConnectionMode}
             onMouseDown={handleCardMouseDown}
+            onTouchStart={handleCardTouchStart}
             onDelete={onDeleteCard}
             onDuplicate={onDuplicateCard}
             onPreview={onPreviewCard}
@@ -1191,6 +1494,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               isAttached={Boolean(note.attachedTo && attachedCard)}
               attachedCardName={attachedCard?.name || 'Карточка'}
               onMouseDown={handleNoteMouseDown}
+              onTouchStart={handleNoteTouchStart}
               onUpdateText={onUpdateNoteText}
               onUpdateColor={onUpdateNoteColor}
               onUpdateSize={onUpdateNoteSize}
@@ -1404,7 +1708,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                   Канвас готов к работе
                 </h2>
                 <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                  Перетащите фото товаров на канвас или сделайте <b>двойной клик</b> на пустом месте, чтобы создать текстовую заметку для генерации.
+                  Перетащите фото товаров на канвас или нажмите кнопку <b>«+ Фото»</b> сверху.
                 </p>
               </div>
               <div className="pt-1 flex justify-center gap-2">
@@ -1422,13 +1726,13 @@ export const Canvas: React.FC<CanvasProps> = ({
           </div>
         )}
 
-      {/* Bottom Floating Toolbar: Hints */}
+      {/* Bottom Floating Toolbar: Hints (Desktop) */}
       <div className="absolute bottom-6 left-6 hidden lg:flex items-center gap-4 bg-white/80 backdrop-blur-sm border border-white/60 px-4 py-2 rounded-full shadow-sm text-[11px] text-gray-500 z-30 pointer-events-none">
         <span className="flex items-center">
           <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-200 rounded shadow-sm text-gray-700 font-sans mr-1.5 text-[10px]">
             Двойной клик
           </kbd>{' '}
-          Создать заметку
+          Заметка
         </span>
         <span className="text-gray-300">•</span>
         <span className="flex items-center">
@@ -1440,16 +1744,9 @@ export const Canvas: React.FC<CanvasProps> = ({
         <span className="text-gray-300">•</span>
         <span className="flex items-center">
           <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-200 rounded shadow-sm text-gray-700 font-sans mr-1.5 text-[10px]">
-            Ctrl + Wheel
+            Ctrl + Колесо
           </kbd>{' '}
           Зум
-        </span>
-        <span className="text-gray-300">•</span>
-        <span className="flex items-center">
-          <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-200 rounded shadow-sm text-gray-700 font-sans mr-1.5 text-[10px]">
-            Del
-          </kbd>{' '}
-          Удалить
         </span>
       </div>
 

@@ -40,7 +40,8 @@ import { GenerationPanel, ConsideredNoteInfo } from './components/GenerationPane
 import { MasterPromptsModal } from './components/MasterPromptsModal';
 import { StyleAnalysisModal } from './components/StyleAnalysisModal';
 import { ProductLibraryDrawer, loadGlobalProducts, saveGlobalProducts } from './components/ProductLibraryDrawer';
-import { ImageCropModal } from './components/ImageCropModal';
+import { ImageCropModal, CropAspectRatio } from './components/ImageCropModal';
+import { RightDrawer } from './components/RightDrawer';
 
 interface CanvasCropQueueItem {
   id: string;
@@ -96,6 +97,7 @@ export default function App() {
 
   // Modal & Panel states
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isRightDrawerOpen, setIsRightDrawerOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -516,6 +518,233 @@ export default function App() {
       setPendingCanvasCards([]);
     }
   }, [canvasCropQueue.length, canvasCropIndex, pendingCanvasCards, activeProject.cards, handleUpdateCards]);
+
+  // Apply chosen aspect ratio crop to all remaining photos in batch queue
+  const handleApplyCropToAllRemaining = useCallback(
+    async (aspectRatio: CropAspectRatio) => {
+      const remainingItems = canvasCropQueue.slice(canvasCropIndex);
+      if (remainingItems.length === 0) return;
+
+      const currentCards = activeProject.cards || [];
+      const newCards: Card[] = [...pendingCanvasCards];
+      const maxZ = currentCards.reduce((max, c) => Math.max(max, c.zIndex || 1), 1);
+
+      for (let i = 0; i < remainingItems.length; i++) {
+        const item = remainingItems[i];
+        const totalCreated = newCards.length;
+
+        const posX = item.atCanvasPos
+          ? item.atCanvasPos.x + totalCreated * 35
+          : 150 + totalCreated * 35;
+        const posY = item.atCanvasPos
+          ? item.atCanvasPos.y + totalCreated * 35
+          : 150 + totalCreated * 35;
+
+        try {
+          const cropped = await new Promise<{ src: string; width: number; height: number }>((resolve) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+              let targetRatio: number | null = null;
+              if (aspectRatio === '1:1') targetRatio = 1.0;
+              else if (aspectRatio === '4:3') targetRatio = 4 / 3;
+              else if (aspectRatio === '16:9') targetRatio = 16 / 9;
+
+              let sx = 0;
+              let sy = 0;
+              let sw = img.naturalWidth;
+              let sh = img.naturalHeight;
+
+              if (targetRatio !== null) {
+                if (sw / sh > targetRatio) {
+                  const newW = Math.round(sh * targetRatio);
+                  sx = Math.round((sw - newW) / 2);
+                  sw = newW;
+                } else {
+                  const newH = Math.round(sw / targetRatio);
+                  sy = Math.round((sh - newH) / 2);
+                  sh = newH;
+                }
+              }
+
+              const maxDim = 800;
+              let outW = sw;
+              let outH = sh;
+              if (outW > maxDim || outH > maxDim) {
+                if (outW >= outH) {
+                  outH = Math.round((outH * maxDim) / outW);
+                  outW = maxDim;
+                } else {
+                  outW = Math.round((outW * maxDim) / outH);
+                  outH = maxDim;
+                }
+              }
+
+              const canvas = document.createElement('canvas');
+              canvas.width = outW;
+              canvas.height = outH;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                resolve({ src: dataUrl, width: outW, height: outH });
+              } else {
+                resolve({ src: item.rawSrc, width: img.naturalWidth, height: img.naturalHeight });
+              }
+            };
+            img.onerror = () => {
+              resolve({ src: item.rawSrc, width: 300, height: 300 });
+            };
+            img.src = item.rawSrc;
+          });
+
+          const cardWidth = Math.min(300, Math.max(180, cropped.width));
+          const cardHeight = Math.round(cardWidth * (cropped.height / cropped.width)) || 240;
+
+          newCards.push({
+            id: `card_${Date.now()}_${totalCreated}_${Math.random().toString(36).substr(2, 5)}`,
+            x: Math.round(posX),
+            y: Math.round(posY),
+            width: cardWidth,
+            height: cardHeight,
+            src: cropped.src,
+            name: item.name,
+            aspectRatio: cropped.width / cropped.height,
+            zIndex: maxZ + 1 + totalCreated,
+          });
+        } catch (err) {
+          console.error('Failed to crop batch image:', err);
+        }
+      }
+
+      const mergedCards = [...currentCards, ...newCards];
+      handleUpdateCards(mergedCards);
+
+      const newIds = new Set(newCards.map((c) => c.id));
+      setSelectedCardIds(newIds);
+      setSelectedNoteIds(new Set());
+
+      setCanvasCropQueue([]);
+      setCanvasCropIndex(0);
+      setPendingCanvasCards([]);
+    },
+    [canvasCropQueue, canvasCropIndex, pendingCanvasCards, activeProject.cards, handleUpdateCards]
+  );
+
+  // Skip all remaining and import original uncropped images directly
+  const handleSkipAllAndImportOriginals = useCallback(async () => {
+    const remainingItems = canvasCropQueue.slice(canvasCropIndex);
+    if (remainingItems.length === 0) return;
+
+    const currentCards = activeProject.cards || [];
+    const newCards: Card[] = [...pendingCanvasCards];
+    const maxZ = currentCards.reduce((max, c) => Math.max(max, c.zIndex || 1), 1);
+
+    for (let i = 0; i < remainingItems.length; i++) {
+      const item = remainingItems[i];
+      const totalCreated = newCards.length;
+
+      const posX = item.atCanvasPos
+        ? item.atCanvasPos.x + totalCreated * 35
+        : 150 + totalCreated * 35;
+      const posY = item.atCanvasPos
+        ? item.atCanvasPos.y + totalCreated * 35
+        : 150 + totalCreated * 35;
+
+      const dimensions = await new Promise<{ width: number; height: number }>((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve({ width: img.naturalWidth || 300, height: img.naturalHeight || 300 });
+        img.onerror = () => resolve({ width: 300, height: 300 });
+        img.src = item.rawSrc;
+      });
+
+      const cardWidth = Math.min(300, Math.max(180, dimensions.width));
+      const cardHeight = Math.round(cardWidth * (dimensions.height / dimensions.width)) || 240;
+
+      newCards.push({
+        id: `card_${Date.now()}_${totalCreated}_${Math.random().toString(36).substr(2, 5)}`,
+        x: Math.round(posX),
+        y: Math.round(posY),
+        width: cardWidth,
+        height: cardHeight,
+        src: item.rawSrc,
+        name: item.name,
+        aspectRatio: dimensions.width / dimensions.height,
+        zIndex: maxZ + 1 + totalCreated,
+      });
+    }
+
+    const mergedCards = [...currentCards, ...newCards];
+    handleUpdateCards(mergedCards);
+
+    const newIds = new Set(newCards.map((c) => c.id));
+    setSelectedCardIds(newIds);
+    setSelectedNoteIds(new Set());
+
+    setCanvasCropQueue([]);
+    setCanvasCropIndex(0);
+    setPendingCanvasCards([]);
+  }, [canvasCropQueue, canvasCropIndex, pendingCanvasCards, activeProject.cards, handleUpdateCards]);
+
+  // Skip current photo only and advance
+  const handleSkipCurrentCanvasCrop = useCallback(async () => {
+    const currentItem = canvasCropQueue[canvasCropIndex];
+    if (!currentItem) return;
+
+    const currentCards = activeProject.cards || [];
+    const totalCreated = pendingCanvasCards.length;
+
+    const posX = currentItem.atCanvasPos
+      ? currentItem.atCanvasPos.x + totalCreated * 35
+      : 150 + totalCreated * 35;
+    const posY = currentItem.atCanvasPos
+      ? currentItem.atCanvasPos.y + totalCreated * 35
+      : 150 + totalCreated * 35;
+
+    const dimensions = await new Promise<{ width: number; height: number }>((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth || 300, height: img.naturalHeight || 300 });
+      img.onerror = () => resolve({ width: 300, height: 300 });
+      img.src = currentItem.rawSrc;
+    });
+
+    const cardWidth = Math.min(300, Math.max(180, dimensions.width));
+    const cardHeight = Math.round(cardWidth * (dimensions.height / dimensions.width)) || 240;
+    const maxZ = currentCards.reduce((max, c) => Math.max(max, c.zIndex || 1), 1);
+
+    const newCard: Card = {
+      id: `card_${Date.now()}_${totalCreated}_${Math.random().toString(36).substr(2, 5)}`,
+      x: Math.round(posX),
+      y: Math.round(posY),
+      width: cardWidth,
+      height: cardHeight,
+      src: currentItem.rawSrc,
+      name: currentItem.name,
+      aspectRatio: dimensions.width / dimensions.height,
+      zIndex: maxZ + 1 + totalCreated,
+    };
+
+    const newPending = [...pendingCanvasCards, newCard];
+    setPendingCanvasCards(newPending);
+
+    const nextIndex = canvasCropIndex + 1;
+    if (nextIndex < canvasCropQueue.length) {
+      setCanvasCropIndex(nextIndex);
+    } else {
+      const mergedCards = [...currentCards, ...newPending];
+      handleUpdateCards(mergedCards);
+
+      const newIds = new Set(newPending.map((c) => c.id));
+      setSelectedCardIds(newIds);
+      setSelectedNoteIds(new Set());
+
+      setCanvasCropQueue([]);
+      setCanvasCropIndex(0);
+      setPendingCanvasCards([]);
+    }
+  }, [canvasCropQueue, canvasCropIndex, pendingCanvasCards, activeProject.cards, handleUpdateCards]);
 
   // Generate Sample Reference Product Card
   const handleGenerateSample = useCallback(() => {
@@ -1371,6 +1600,7 @@ export default function App() {
         onAddSiteMockup={handleAddSiteMockupClick}
         hasSiteMockup={Boolean(activeProject.siteMockup)}
         onExportImages={handleExportImages}
+        onOpenRightDrawer={() => setIsRightDrawerOpen(true)}
       />
 
       {/* Main Workspace: Sidebar + Infinite Canvas */}
@@ -1530,6 +1760,28 @@ export default function App() {
         onClose={() => setPreviewCard(null)}
       />
 
+      {/* Right Drawer for Secondary/Mobile Controls */}
+      <RightDrawer
+        isOpen={isRightDrawerOpen}
+        onClose={() => setIsRightDrawerOpen(false)}
+        projectName={activeProject.name}
+        storageInfo={storageInfo}
+        onOpenExportModal={() => setIsExportModalOpen(true)}
+        onOpenShortcuts={() => setIsShortcutsOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        onGenerateSample={handleGenerateSample}
+        onOptimizeMemory={handleOptimizeMemory}
+        onClearMemory={handleClearMemory}
+        isOptimizing={isOptimizing}
+        onOpenMasterPrompts={() => setIsMasterPromptsOpen(true)}
+        onExportProject={handleExportProject}
+        onImportProject={handleImportProjectClick}
+        onClearAll={handleClearAll}
+        onAddSiteMockup={handleAddSiteMockupClick}
+        hasSiteMockup={Boolean(activeProject.siteMockup)}
+        onExportImages={handleExportImages}
+      />
+
       {/* Image Crop Modal for Canvas Uploads / Drops */}
       {canvasCropQueue.length > 0 && canvasCropIndex < canvasCropQueue.length && (
         <ImageCropModal
@@ -1544,9 +1796,11 @@ export default function App() {
           }}
           onSave={handleSaveCanvasCrop}
           onCancel={handleCancelCanvasCrop}
+          onApplyToAllRemaining={handleApplyCropToAllRemaining}
+          onSkipAllAndImportOriginals={handleSkipAllAndImportOriginals}
+          onSkipCurrent={handleSkipCurrentCanvasCrop}
         />
       )}
     </div>
   );
-
 }
