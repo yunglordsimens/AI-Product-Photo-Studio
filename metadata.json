@@ -1,0 +1,6 @@
+{
+  "name": "AI Product Photo Studio",
+  "description": "Бесконечный канвас для организации референсов и генерации AI-фотографий товаров через Google Gemini API.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
