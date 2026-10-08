@@ -55,6 +55,7 @@ interface TopBarProps {
   onAddSiteMockup?: () => void;
   hasSiteMockup?: boolean;
   onExportImages?: () => void;
+  onOpenCatalog?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -89,6 +90,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onAddSiteMockup,
   hasSiteMockup = false,
   onExportImages,
+  onOpenCatalog,
 }) => {
   const isStorageHigh = storageInfo.percentage >= 80;
   const usedMb = (storageInfo.usedBytes / (1024 * 1024)).toFixed(1);
@@ -163,6 +165,19 @@ export const TopBar: React.FC<TopBarProps> = ({
           <span className="hidden sm:inline">AI (G)</span>
           <span className="sm:hidden">AI</span>
         </button>
+
+        {/* Catalog mode */}
+        {onOpenCatalog && (
+          <button
+            id="btn-open-catalog"
+            onClick={onOpenCatalog}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-gray-900 hover:bg-gray-700 border border-gray-900 rounded-lg transition-colors shrink-0 cursor-pointer"
+            title="Каталог: один стиль на все фото"
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Каталог</span>
+          </button>
+        )}
 
         {/* Desktop-only Direct Tools */}
         <div className="hidden lg:flex items-center gap-1 sm:gap-1.5">

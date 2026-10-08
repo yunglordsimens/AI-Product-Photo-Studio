@@ -1,30 +1,139 @@
 import { Card } from '../types';
 
 export const API_KEY_STORAGE_KEY = 'aips_api_key';
+export const STUDIO_PASSWORD_STORAGE_KEY = 'aips_studio_password';
+export const IMAGE_MODEL_STORAGE_KEY = 'aips_image_model';
+export const DEFAULT_IMAGE_MODEL = 'gemini-2.5-flash-image';
+export const TEXT_MODEL = 'gemini-2.5-flash';
 
-export function getStoredApiKey(): string {
+function readLocal(key: string): string {
   try {
-    const fromStorage = localStorage.getItem(API_KEY_STORAGE_KEY);
-    if (fromStorage && fromStorage.trim().length > 0) {
-      return fromStorage.trim();
-    }
-    // Fallback to environment variable if configured on Vercel / deployment
-    const envKey = (import.meta as unknown as { env?: { VITE_GEMINI_API_KEY?: string } }).env?.VITE_GEMINI_API_KEY;
-    if (envKey && typeof envKey === 'string' && envKey.trim().length > 0) {
-      return envKey.trim();
-    }
-    return '';
+    return (localStorage.getItem(key) || '').trim();
   } catch {
     return '';
   }
 }
 
-export function setStoredApiKey(key: string): void {
+function writeLocal(key: string, value: string): void {
   try {
-    localStorage.setItem(API_KEY_STORAGE_KEY, key.trim());
+    if (value.trim()) localStorage.setItem(key, value.trim());
+    else localStorage.removeItem(key);
   } catch (err) {
-    console.error('Failed to save API key to localStorage', err);
+    console.error('Failed to save setting', key, err);
   }
+}
+
+/**
+ * Personal Gemini key stored in this browser only (optional).
+ * The key is never baked into the bundle: without a personal key, requests go
+ * through the private server proxy (/api/gemini), which holds GEMINI_API_KEY.
+ */
+export function getStoredApiKey(): string {
+  return readLocal(API_KEY_STORAGE_KEY);
+}
+
+export function setStoredApiKey(key: string): void {
+  writeLocal(API_KEY_STORAGE_KEY, key);
+}
+
+export function getStudioPassword(): string {
+  return readLocal(STUDIO_PASSWORD_STORAGE_KEY);
+}
+
+export function setStudioPassword(password: string): void {
+  writeLocal(STUDIO_PASSWORD_STORAGE_KEY, password);
+}
+
+export function getImageModel(): string {
+  return readLocal(IMAGE_MODEL_STORAGE_KEY) || DEFAULT_IMAGE_MODEL;
+}
+
+export function setImageModel(model: string): void {
+  writeLocal(IMAGE_MODEL_STORAGE_KEY, model);
+}
+
+/** True when generation can run: either a personal key or a studio password for the proxy. */
+export function hasGenerationAccess(): boolean {
+  return Boolean(getStoredApiKey() || getStudioPassword());
+}
+
+export class GeminiHttpError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/**
+ * Sends a generateContent request either directly (personal key in this browser)
+ * or through the private server proxy (/api/gemini) protected by the studio password.
+ */
+export async function callGemini(
+  model: string,
+  payload: Record<string, unknown>,
+  apiKeyOverride?: string
+): Promise<any> {
+  const personalKey = (apiKeyOverride ?? getStoredApiKey()).trim();
+  let response: Response;
+
+  if (personalKey) {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': personalKey },
+        body: JSON.stringify(payload),
+      }
+    );
+  } else {
+    const password = getStudioPassword();
+    if (!password) {
+      throw new GeminiHttpError('Нет доступа: укажите пароль студии или личный API-ключ в настройках', 401);
+    }
+    response = await fetch('/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-studio-password': password },
+      body: JSON.stringify({ model, payload }),
+    });
+  }
+
+  let json: any = null;
+  try {
+    json = await response.json();
+  } catch {
+    json = null;
+  }
+
+  if (!response.ok) {
+    const msg = json?.error?.message || json?.error || `HTTP ${response.status}`;
+    if (response.status === 401) {
+      throw new GeminiHttpError('Неверный пароль студии (проверьте настройки)', 401);
+    }
+    if (response.status === 413) {
+      throw new GeminiHttpError('Слишком большие картинки для запроса. Уменьшите фото.', 413);
+    }
+    throw new GeminiHttpError(`Ошибка ${model}: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`, response.status);
+  }
+  return json;
+}
+
+/** Pulls the first image out of a generateContent response. */
+export function extractImageFromResponse(json: any): { mimeType: string; base64: string } | null {
+  const parts = json?.candidates?.[0]?.content?.parts || [];
+  for (const part of parts) {
+    if (part.inlineData?.data) return { mimeType: part.inlineData.mimeType || 'image/png', base64: part.inlineData.data };
+    if (part.inline_data?.data) return { mimeType: part.inline_data.mime_type || 'image/png', base64: part.inline_data.data };
+  }
+  return null;
+}
+
+export function extractTextFromResponse(json: any): string {
+  const parts = json?.candidates?.[0]?.content?.parts || [];
+  return parts
+    .map((p: { text?: string }) => p.text || '')
+    .join('')
+    .trim();
 }
 
 /**
@@ -80,10 +189,6 @@ export async function analyzeStyleWithGemini(
   apiKey: string,
   referenceCards: Card[]
 ): Promise<string> {
-  if (!apiKey || !apiKey.trim()) {
-    throw new Error('Введите API-ключ Gemini в настройках');
-  }
-
   if (!referenceCards || referenceCards.length === 0) {
     throw new Error('Пожалуйста, выделите хотя бы одну карточку для анализа стиля');
   }
@@ -121,25 +226,7 @@ export async function analyzeStyleWithGemini(
     ],
   };
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey.trim()}`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const responseJson = await response.json();
-
-  if (!response.ok) {
-    const errorMsg =
-      responseJson?.error?.message ||
-      responseJson?.error?.status ||
-      `HTTP ${response.status}`;
-    throw new Error(`Ошибка анализа стиля (gemini-2.5-flash): ${errorMsg}`);
-  }
+  const responseJson = await callGemini(TEXT_MODEL, payload, apiKey);
 
   const candidate = responseJson?.candidates?.[0];
   if (!candidate) {
@@ -181,12 +268,11 @@ export async function generateImageWithGemini(
     productImageDataUrl?: string;
     isProductReplacement?: boolean;
     customPromptOverride?: string;
+    temperature?: number;
+    aspectRatio?: string;
+    model?: string;
   }
 ): Promise<GenerateImageResult> {
-  if (!apiKey || !apiKey.trim()) {
-    throw new Error('Введите API-ключ в настройках');
-  }
-
   let promptText = '';
   if (options?.customPromptOverride) {
     promptText = options.customPromptOverride.trim();
@@ -244,33 +330,17 @@ export async function generateImageWithGemini(
       },
     ],
     generationConfig: {
-      temperature: 0.9,
+      temperature: options?.temperature ?? 0.9,
       topP: 0.95,
       topK: 40,
       maxOutputTokens: 8192,
-      responseModalities: ['image', 'text'],
+      responseModalities: ['IMAGE', 'TEXT'],
+      ...(options?.aspectRatio ? { imageConfig: { aspectRatio: options.aspectRatio } } : {}),
     },
   };
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${apiKey.trim()}`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const responseJson = await response.json();
-
-  if (!response.ok) {
-    const errorMsg =
-      responseJson?.error?.message ||
-      responseJson?.error?.status ||
-      `HTTP ${response.status}`;
-    throw new Error(`Ошибка генерации (gemini-2.5-flash-image): ${errorMsg}`);
-  }
+  const model = options?.model || getImageModel();
+  const responseJson = await callGemini(model, payload, apiKey);
 
   const candidate = responseJson?.candidates?.[0];
   if (!candidate) {
@@ -300,7 +370,7 @@ export async function generateImageWithGemini(
     if (textPart?.text) {
       throw new Error(`Модель вернула текст вместо изображения: "${textPart.text.slice(0, 150)}..."`);
     }
-    throw new Error('Модель gemini-2.5-flash-image не вернула данные изображения.');
+    throw new Error('Модель не вернула данные изображения.');
   }
 
   const imageUrl = `data:${mimeType};base64,${generatedBase64}`;

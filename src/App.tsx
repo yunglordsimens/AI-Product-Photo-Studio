@@ -28,7 +28,7 @@ import {
   saveMasterPrompts,
 } from './utils/storage';
 import { compressAndLoadImage, compressDataUrl, createSampleCard } from './utils/imageUtils';
-import { getStoredApiKey, generateImageWithGemini, analyzeStyleWithGemini } from './utils/gemini';
+import { getStoredApiKey, hasGenerationAccess, generateImageWithGemini, analyzeStyleWithGemini } from './utils/gemini';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { Canvas } from './components/Canvas';
@@ -42,6 +42,7 @@ import { StyleAnalysisModal } from './components/StyleAnalysisModal';
 import { ProductLibraryDrawer, loadGlobalProducts, saveGlobalProducts } from './components/ProductLibraryDrawer';
 import { ImageCropModal, CropAspectRatio } from './components/ImageCropModal';
 import { RightDrawer } from './components/RightDrawer';
+import { CatalogStudio } from './components/CatalogStudio';
 
 interface CanvasCropQueueItem {
   id: string;
@@ -102,6 +103,7 @@ export default function App() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isGenerationOpen, setIsGenerationOpen] = useState(false);
+  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [previewCard, setPreviewCard] = useState<Card | null>(null);
@@ -1091,8 +1093,8 @@ export default function App() {
     options?: { isProductReplacement?: boolean; selectedProduct?: ProductItem }
   ) => {
     const apiKey = getStoredApiKey();
-    if (!apiKey || !apiKey.trim()) {
-      setGenerationError('Введите API-ключ в настройках');
+    if (!hasGenerationAccess()) {
+      setGenerationError('Укажите пароль студии или API-ключ в настройках');
       setIsSettingsOpen(true);
       return;
     }
@@ -1171,8 +1173,8 @@ export default function App() {
     onProgress: (current: number, total: number, currentProductName: string) => void
   ): Promise<number> => {
     const apiKey = getStoredApiKey();
-    if (!apiKey || !apiKey.trim()) {
-      setGenerationError('Введите API-ключ в настройках');
+    if (!hasGenerationAccess()) {
+      setGenerationError('Укажите пароль студии или API-ключ в настройках');
       setIsSettingsOpen(true);
       throw new Error('API-ключ не задан');
     }
@@ -1473,7 +1475,7 @@ export default function App() {
   // Style Analysis Handlers (gemini-2.5-flash)
   const handleAnalyzeStyle = useCallback(async () => {
     const apiKey = getStoredApiKey();
-    if (!apiKey) {
+    if (!hasGenerationAccess()) {
       setIsSettingsOpen(true);
       return;
     }
@@ -1601,6 +1603,7 @@ export default function App() {
         hasSiteMockup={Boolean(activeProject.siteMockup)}
         onExportImages={handleExportImages}
         onOpenRightDrawer={() => setIsRightDrawerOpen(true)}
+        onOpenCatalog={() => setIsCatalogOpen(true)}
       />
 
       {/* Main Workspace: Sidebar + Infinite Canvas */}
@@ -1780,6 +1783,16 @@ export default function App() {
         onAddSiteMockup={handleAddSiteMockupClick}
         hasSiteMockup={Boolean(activeProject.siteMockup)}
         onExportImages={handleExportImages}
+      />
+
+      <CatalogStudio
+        isOpen={isCatalogOpen}
+        onClose={() => setIsCatalogOpen(false)}
+        projectId={activeProject.id}
+        projectName={activeProject.name}
+        products={productsList}
+        selectedCards={selectedCardsList}
+        onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       {/* Image Crop Modal for Canvas Uploads / Drops */}
