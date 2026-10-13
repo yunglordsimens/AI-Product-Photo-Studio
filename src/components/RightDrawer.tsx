@@ -108,8 +108,8 @@ export const RightDrawer: React.FC<RightDrawerProps> = ({
 
         {/* Content Scrollable */}
         <div className="flex-1 overflow-y-auto p-4 space-y-5 text-sm">
-          {/* Section: AI & Creative Tools */}
-          <div className="space-y-1.5">
+          {/* Section: AI & Creative Tools — same as the top bar on desktop, so only shown on smaller screens */}
+          <div className="space-y-1.5 lg:hidden">
             <span className="text-[11px] font-semibold tracking-wider text-gray-400 uppercase px-1">
               Креативные инструменты
             </span>

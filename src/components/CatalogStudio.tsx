@@ -43,6 +43,7 @@ import {
   withRetry,
 } from '../utils/catalog';
 import { buildZip, dataUrlToBytes, downloadBlob } from '../utils/zip';
+import { isImageFile, normalizeImageFiles } from '../utils/heic';
 
 interface CatalogStudioProps {
   isOpen: boolean;
@@ -194,7 +195,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
     }
     const added: CatalogState['refs'] = [];
     let skipped = 0;
-    for (const file of files.slice(0, room)) {
+    for (const file of (await normalizeImageFiles(files)).slice(0, room)) {
       const src = await prepareImage(file, 1024, 0.88);
       if (src) added.push({ id: newId('ref'), name: file.name, src });
       else skipped++;
@@ -217,9 +218,9 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   };
 
   const addItemFiles = async (files: File[]) => {
-    const images = files
-      .filter((f) => f.type.startsWith('image/') || IMAGE_EXT.test(f.name))
-      .sort((a, b) => naturalSort(a.name, b.name));
+    const images = (await normalizeImageFiles(files.filter((f) => isImageFile(f) || IMAGE_EXT.test(f.name)))).sort(
+      (a, b) => naturalSort(a.name, b.name)
+    );
     if (images.length === 0) {
       setNotice({ kind: 'info', text: 'В выбранном нет картинок.' });
       return;
@@ -906,7 +907,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
       <input
         ref={refInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         multiple
         className="hidden"
         onChange={(e) => {
@@ -918,7 +919,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
       <input
         ref={filesInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         multiple
         className="hidden"
         onChange={(e) => {

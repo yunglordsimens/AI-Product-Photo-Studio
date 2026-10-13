@@ -3,6 +3,7 @@ import { X, Plus, Trash2, Upload, Image as ImageIcon, Save, Check, PlusCircle, C
 import { ProductItem } from '../types';
 import { compressImageDataUrl, loadGlobalProducts, saveGlobalProducts } from '../utils/storage';
 import { ImageCropModal } from './ImageCropModal';
+import { normalizeImageFiles } from '../utils/heic';
 
 export { loadGlobalProducts, saveGlobalProducts };
 
@@ -67,11 +68,13 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || activeUploadIndex === null) return;
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = e.target.files?.[0];
+    if (!picked || activeUploadIndex === null) return;
 
     try {
+      const [file] = await normalizeImageFiles([picked]);
+      if (!file) return;
       const reader = new FileReader();
       reader.onload = (ev) => {
         const rawDataUrl = ev.target?.result as string;
@@ -275,7 +278,7 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
           type="file"
           ref={fileInputRef}
           onChange={handleFileChange}
-          accept="image/*"
+          accept="image/*,.heic,.heif"
           className="hidden"
         />
 

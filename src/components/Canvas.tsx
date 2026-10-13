@@ -3,6 +3,7 @@ import { Card, CardGroup, Connection, MarqueeBox, Note, NoteColor, Project, Site
 import { CardItem } from './CardItem';
 import { NoteItem } from './NoteItem';
 import { ZoomControls } from './ZoomControls';
+import { isImageFile } from '../utils/heic';
 import {
   Layers,
   Sparkles,
@@ -333,13 +334,17 @@ export const Canvas: React.FC<CanvasProps> = ({
     onUpdatePanZoom(newPan, finalZoom);
   };
 
-  // Wheel handler: Panning and Zooming with cursor focus
-  const handleWheel = (e: React.WheelEvent) => {
+  // Wheel handler: panning, and zooming with cursor focus.
+  // Trackpad pinch arrives as wheel + ctrlKey. React's onWheel is passive, so the
+  // browser would still zoom the whole page; we attach a native non-passive listener below.
+  const handleWheel = (e: WheelEvent) => {
     e.preventDefault();
     if (!containerRef.current) return;
 
     if (e.ctrlKey || e.metaKey) {
-      const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
+      // Smooth for pinch (many small deltas) and for mouse wheel (few big ones)
+      const delta = Math.max(-40, Math.min(40, e.deltaY));
+      const zoomFactor = Math.exp(-delta * 0.006);
       const nextZoom = Math.max(0.1, Math.min(zoom * zoomFactor, 4.0));
 
       const rect = containerRef.current.getBoundingClientRect();
@@ -356,6 +361,27 @@ export const Canvas: React.FC<CanvasProps> = ({
       onUpdatePanZoom({ x: pan.x - e.deltaX, y: pan.y - e.deltaY }, zoom);
     }
   };
+
+  const wheelHandlerRef = useRef(handleWheel);
+  wheelHandlerRef.current = handleWheel;
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => wheelHandlerRef.current(e);
+    // Safari sends its own gesture events for pinch; stop the page zoom there too
+    const stopGesture = (e: Event) => e.preventDefault();
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('gesturestart', stopGesture);
+    el.addEventListener('gesturechange', stopGesture);
+    el.addEventListener('gestureend', stopGesture);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('gesturestart', stopGesture);
+      el.removeEventListener('gesturechange', stopGesture);
+      el.removeEventListener('gestureend', stopGesture);
+    };
+  }, []);
 
   // Double click canvas to create sticky note
   const handleCanvasDoubleClick = (e: React.MouseEvent) => {
@@ -1131,7 +1157,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     e.preventDefault();
     setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const files = Array.from(e.dataTransfer.files).filter((f: File) => f.type.startsWith('image/'));
+      const files = Array.from(e.dataTransfer.files).filter((f: File) => isImageFile(f));
       if (files.length > 0) {
         const dropPos = screenToCanvas(e.clientX, e.clientY);
         onAddImages(files, dropPos);
@@ -1181,7 +1207,6 @@ export const Canvas: React.FC<CanvasProps> = ({
           ? 'cursor-crosshair'
           : 'cursor-default'
       }`}
-      onWheel={handleWheel}
       onMouseDown={handleCanvasMouseDown}
       onDoubleClick={handleCanvasDoubleClick}
       onContextMenu={handleContextMenu}
@@ -1429,9 +1454,9 @@ export const Canvas: React.FC<CanvasProps> = ({
 
                 <path
                   d={d}
-                  stroke={isConnSelected ? '#ef4444' : '#3b82f6'}
-                  strokeWidth={isConnSelected ? 3 : 2.5}
-                  strokeDasharray={isConnSelected ? '6,4' : undefined}
+                  stroke={isConnSelected ? '#ef4444' : conn.auto ? '#94a3b8' : '#3b82f6'}
+                  strokeWidth={isConnSelected ? 3 : conn.auto ? 1.75 : 2.5}
+                  strokeDasharray={isConnSelected ? '6,4' : conn.auto ? '2,5' : undefined}
                   fill="none"
                   markerEnd={isConnSelected ? 'url(#conn-arrow-selected)' : 'url(#conn-arrow)'}
                   className="cursor-pointer transition-all hover:stroke-blue-500"
@@ -1548,7 +1573,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               className="w-full px-3 py-2 text-left text-gray-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2 font-medium cursor-pointer"
             >
               <Palette className="w-3.5 h-3.5 text-purple-600" />
-              <span>Анализировать стиль</span>
+              <span>Описать стиль (теги света, фона, ракурса)</span>
             </button>
           )}
 

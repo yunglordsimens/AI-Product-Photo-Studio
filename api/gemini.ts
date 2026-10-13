@@ -1,7 +1,7 @@
 /**
  * Private Gemini proxy (Vercel serverless function).
  *
- * The browser never sees the API key: it sends { model, payload } with the
+ * The browser never sees the API key: it sends { model, payload, endpoint? } with the
  * studio password in the `x-studio-password` header, and this function adds
  * GEMINI_API_KEY server-side.
  *
@@ -66,18 +66,24 @@ export default async function handler(req: Req, res: Res) {
 
   const model = body?.model;
   const payload = body?.payload;
+  // 'generateContent' (default) or 'interactions' (newer Gemini API, used as a fallback)
+  const endpoint = body?.endpoint === 'interactions' ? 'interactions' : 'generateContent';
   if (typeof model !== 'string' || !MODEL_PATTERN.test(model) || !payload || typeof payload !== 'object') {
     res.status(400).json({ error: { message: 'Expected { model, payload }' } });
     return;
   }
 
   try {
+    const url =
+      endpoint === 'interactions'
+        ? 'https://generativelanguage.googleapis.com/v1beta/interactions'
+        : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
     const upstream = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      url,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(endpoint === 'interactions' ? { ...payload, model } : payload),
       }
     );
     const text = await upstream.text();

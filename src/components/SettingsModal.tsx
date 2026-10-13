@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Settings, X, Key, Check, Eye, EyeOff, Lock, Cpu } from 'lucide-react';
 import {
   DEFAULT_IMAGE_MODEL,
+  IMAGE_MODEL_OPTIONS,
   getImageModel,
   getStoredApiKey,
   getStudioPassword,
@@ -140,11 +141,32 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
                 onChange={(e) => setModel(e.target.value)}
                 placeholder={DEFAULT_IMAGE_MODEL}
                 className={inputClass}
+                list="settings-image-model-options"
               />
+              <datalist id="settings-image-model-options">
+                {IMAGE_MODEL_OPTIONS.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.note}
+                  </option>
+                ))}
+              </datalist>
             </div>
+            <ul className="text-[11px] text-gray-500 leading-relaxed space-y-0.5">
+              {IMAGE_MODEL_OPTIONS.map((o) => (
+                <li key={o.id}>
+                  <button
+                    type="button"
+                    onClick={() => setModel(o.id)}
+                    className={`font-mono hover:text-gray-900 cursor-pointer ${model === o.id ? 'text-gray-900 font-semibold' : ''}`}
+                  >
+                    {o.id}
+                  </button>{' '}
+                  — {o.note}
+                </li>
+              ))}
+            </ul>
             <p className="text-[11px] text-gray-500 leading-relaxed">
-              По умолчанию <span className="font-mono">{DEFAULT_IMAGE_MODEL}</span>. Когда выйдет модель лучше, поменяй
-              здесь одной строкой.
+              Когда выйдет модель лучше, впиши её название сюда.
             </p>
           </div>
 

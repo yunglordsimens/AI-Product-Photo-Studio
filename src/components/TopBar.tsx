@@ -11,7 +11,6 @@ import {
   Menu,
   Zap,
   RotateCcw,
-  HardDrive,
   BookOpen,
   Link2,
   Palette,
@@ -93,7 +92,6 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenCatalog,
 }) => {
   const isStorageHigh = storageInfo.percentage >= 80;
-  const usedMb = (storageInfo.usedBytes / (1024 * 1024)).toFixed(1);
 
   return (
     <header
@@ -187,7 +185,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             onClick={onAnalyzeStyle}
             disabled={isAnalyzingStyle}
             className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors shrink-0 cursor-pointer disabled:opacity-50"
-            title="Анализ стиля выделенных фото"
+            title="Описать стиль выделенных фото: Gemini вернёт теги (свет, фон, цвет, ракурс), их можно сохранить как мастер-промпт"
           >
             <Palette className={`w-3.5 h-3.5 text-indigo-600 ${isAnalyzingStyle ? 'animate-spin' : ''}`} />
             <span className="hidden xl:inline">Стиль</span>
@@ -246,20 +244,27 @@ export const TopBar: React.FC<TopBarProps> = ({
             <Link2 className="w-3.5 h-3.5" />
             <span className="hidden xl:inline">Связи (L)</span>
           </button>
+
+          {/* Site mockup behind the canvas */}
+          {onAddSiteMockup && (
+            <button
+              id="btn-topbar-site-mockup"
+              onClick={onAddSiteMockup}
+              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-all shrink-0 cursor-pointer ${
+                hasSiteMockup
+                  ? 'bg-teal-50 text-teal-800 border-teal-300'
+                  : 'bg-white hover:bg-teal-50 text-teal-700 border-teal-200'
+              }`}
+              title="Положить под доску скриншот сайта клиента и смотреть, как фото встанут на страницу"
+            >
+              <Monitor className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline">Макет сайта</span>
+            </button>
+          )}
         </div>
 
         {/* Desktop-only Quick Right Actions */}
         <div className="hidden lg:flex items-center gap-1 sm:gap-1.5">
-          {/* Storage widget */}
-          <div
-            id="topbar-storage-widget"
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] bg-emerald-50/80 text-emerald-800 border-emerald-200"
-            title={`Хранилище IndexedDB (безлимит): ${usedMb} MB`}
-          >
-            <HardDrive className="w-3.5 h-3.5 text-emerald-600" />
-            <span className="font-medium">{usedMb} MB</span>
-          </div>
-
           <button
             id="btn-topbar-settings"
             onClick={onOpenSettings}

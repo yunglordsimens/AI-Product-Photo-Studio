@@ -1,5 +1,5 @@
-import React, { memo } from 'react';
-import { X, Copy, Maximize2, Move, Link2 } from 'lucide-react';
+import React, { memo, useState } from 'react';
+import { X, Copy, Maximize2, Move, Link2, Info } from 'lucide-react';
 import { Card } from '../types';
 
 interface CardItemProps {
@@ -28,6 +28,11 @@ export const CardItem: React.FC<CardItemProps> = memo(
     onDuplicate,
     onPreview,
   }) => {
+    const [showInfo, setShowInfo] = useState(false);
+    const meta = card.meta;
+    const kindLabel = meta
+      ? { generate: 'Генерация', product: 'Продукт в сцене', fix: 'Исправление исходника', batch: 'Пакет' }[meta.kind]
+      : '';
     return (
       <div
         id={`card-node-${card.id}`}
@@ -118,10 +123,59 @@ export const CardItem: React.FC<CardItemProps> = memo(
           />
         </div>
 
+        {/* How it was made: tiny "i", details on click */}
+        {meta && showInfo && (
+          <div
+            className="absolute left-1 right-1 bottom-9 z-20 p-2 rounded-md bg-white/95 border border-gray-200 shadow-lg text-[10px] leading-snug text-gray-700 space-y-1 max-h-48 overflow-y-auto cursor-text select-text"
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+          >
+            <div className="font-semibold text-gray-900">{kindLabel}</div>
+            {meta.masterPromptName ? (
+              <div>
+                <span className="text-gray-400">Мастер-промпт:</span> {meta.masterPromptName}
+              </div>
+            ) : (
+              <div className="text-gray-400">Свой промпт</div>
+            )}
+            {meta.productName && (
+              <div>
+                <span className="text-gray-400">Продукт:</span> {meta.productName}
+              </div>
+            )}
+            {meta.prompt && <div className="whitespace-pre-wrap break-words">{meta.prompt}</div>}
+            <div className="text-gray-400 font-mono">
+              {meta.model} · источников: {meta.sourceIds?.length || 0}
+            </div>
+          </div>
+        )}
+
         {/* Card Footer Bar with Name and Dimensions */}
         <div className="p-1.5 flex justify-between items-center bg-white">
-          <span className="text-[10px] text-gray-600 font-medium truncate max-w-[130px]" title={card.name}>
-            {card.name || 'product.png'}
+          <span className="flex items-center gap-1 min-w-0">
+            {meta && (
+              <button
+                type="button"
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowInfo((v) => !v);
+                }}
+                className={`shrink-0 rounded-full transition-colors cursor-pointer ${
+                  showInfo ? 'text-gray-900' : 'text-gray-300 hover:text-gray-700'
+                }`}
+                title={meta.masterPromptName ? `Мастер-промпт: ${meta.masterPromptName}` : 'Как сделано'}
+                aria-label="Как сделано"
+              >
+                <Info className="w-3 h-3" />
+              </button>
+            )}
+            <span className="text-[10px] text-gray-600 font-medium truncate max-w-[120px]" title={card.name}>
+              {card.name || 'product.png'}
+            </span>
           </span>
           <span className="text-[9px] font-mono px-1.5 py-0.5 bg-gray-100 rounded text-gray-500 shrink-0">
             {card.width}×{card.height || '300'}

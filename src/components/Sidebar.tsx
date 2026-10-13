@@ -206,32 +206,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Storage Footer */}
         <div className="p-3 sm:p-4 border-t border-gray-100 bg-white">
-          <div className="p-2.5 bg-gray-50 border border-gray-100 rounded-lg space-y-1.5">
+          <div
+            className="p-2.5 bg-gray-50 border border-gray-100 rounded-lg space-y-1"
+            title="Все проекты, фото и мастер-промпты лежат в памяти этого браузера (IndexedDB)"
+          >
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                <span className="text-[11px] font-semibold text-gray-700">Память</span>
-              </div>
+              <span className="text-[11px] font-semibold text-gray-700">Сохранено в этом браузере</span>
               <span className="font-mono text-[10px] text-gray-500">
-                {storageInfo.percentage}%
+                {(storageInfo.usedBytes / (1024 * 1024)).toFixed(1)} MB
               </span>
             </div>
-
-            {/* Progress Bar */}
-            <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-300 ${
-                  storageInfo.percentage > 85
-                    ? 'bg-red-500'
-                    : storageInfo.percentage > 60
-                    ? 'bg-amber-500'
-                    : 'bg-blue-600'
-                }`}
-                style={{ width: `${Math.max(4, storageInfo.percentage)}%` }}
-              />
-            </div>
             <p className="text-[9px] text-gray-400 leading-tight">
-              Локальное автосохранение
+              Не в облаке: на другом устройстве этих проектов нет, а очистка браузера их сотрёт. Для копии — «Скачать проект».
             </p>
           </div>
         </div>

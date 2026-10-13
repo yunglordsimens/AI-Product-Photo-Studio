@@ -13,6 +13,17 @@ export interface Note {
   zIndex?: number;
 }
 
+/** How a generated card was made, shown under the small "i" on the card. */
+export interface GenerationMeta {
+  kind: 'generate' | 'product' | 'fix' | 'batch';
+  prompt: string;
+  masterPromptName?: string;
+  productName?: string;
+  model: string;
+  sourceIds?: string[];
+  createdAt: number;
+}
+
 export interface Card {
   id: string;
   x: number;
@@ -23,12 +34,14 @@ export interface Card {
   name?: string;
   aspectRatio?: number;
   zIndex?: number;
+  meta?: GenerationMeta;
 }
 
 export interface Connection {
   id: string;
   from: string; // card id
   to: string;   // card id
+  auto?: boolean; // drawn automatically: "made from"
 }
 
 export interface CardGroup {

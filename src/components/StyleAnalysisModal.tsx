@@ -94,7 +94,7 @@ export const StyleAnalysisModal: React.FC<StyleAnalysisModalProps> = ({
             <div className="py-12 flex flex-col items-center justify-center gap-3 text-center">
               <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
               <div>
-                <p className="text-sm font-medium text-gray-800">Анализ референсов...</p>
+                <p className="text-sm font-medium text-gray-800">Смотрю на свет, фон, цвет и ракурс...</p>
                 <p className="text-xs text-gray-500 mt-0.5">
                   Модель распознаёт тип света, фон, цветовую палитру и ракурс
                 </p>

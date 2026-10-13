@@ -30,6 +30,7 @@ export interface ConsideredNoteInfo {
 export interface GenerationOptions {
   isProductReplacement?: boolean;
   selectedProduct?: ProductItem;
+  masterPromptName?: string;
 }
 
 interface GenerationPanelProps {
@@ -131,6 +132,13 @@ export function GenerationPanel({
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = `${Math.min(140, Math.max(60, textareaRef.current.scrollHeight))}px`;
     }
+  };
+
+  // Name of the master prompt the text came from (only if it wasn't edited away entirely)
+  const usedMasterPromptName = () => {
+    const mp = masterPrompts.find((p) => p.id === selectedMasterPromptId);
+    if (!mp) return undefined;
+    return prompt.includes(mp.prompt.slice(0, 40)) ? mp.name : `${mp.name} (изменён)`;
   };
 
   const handleMasterPromptSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -244,10 +252,12 @@ export function GenerationPanel({
       onGenerate(prompt, {
         isProductReplacement: true,
         selectedProduct: selectedProd,
+        masterPromptName: usedMasterPromptName(),
       });
     } else {
       onGenerate(prompt, {
         isProductReplacement: false,
+        masterPromptName: usedMasterPromptName(),
       });
     }
   };
@@ -463,17 +473,17 @@ export function GenerationPanel({
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1 text-gray-500">
                 <span className="font-semibold text-gray-700">
-                  Референсы ({selectedCards.length}/5):
+                  Стиль с этих фото ({selectedCards.length}/5)
                 </span>
                 <span className="text-gray-400 text-[10px]">
-                  {selectedCards.length === 0 ? 'Выберите на канвасе' : 'Стиль будет перенесен'}
+                  {selectedCards.length === 0 ? 'выделите фото на доске' : 'свет, фон, цвет и ракурс'}
                 </span>
               </div>
 
               {selectedCards.length === 0 ? (
                 <div className="py-2.5 px-3 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex items-center justify-center gap-2 text-xs text-gray-500">
                   <ImageIcon className="w-4 h-4 text-gray-400" />
-                  <span className="text-[11px]">Кликните по карточкам на канвасе</span>
+                  <span className="text-[11px]">Выделите на доске 1–5 фото: с них возьмутся свет, фон, цвет и ракурс</span>
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5 overflow-x-auto p-1.5 bg-gray-50 border border-gray-200 rounded-xl custom-scrollbar">
@@ -515,12 +525,12 @@ export function GenerationPanel({
               <div className="flex items-center justify-between text-[11px] text-gray-500">
                 <div className="flex items-center gap-1 font-semibold text-gray-700">
                   <StickyNote className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Учтённые заметки:</span>
+                  <span>Заметки в промпт</span>
                 </div>
                 <span className="text-[10px] text-gray-400">
                   {consideredNotes.length > 0
-                    ? `${consideredNotes.length} шт. (прикреплённые и рядом)`
-                    : 'Автосбор с канваса'}
+                    ? `${consideredNotes.length} шт., добавятся к промпту`
+                    : 'собираются сами'}
                 </span>
               </div>
 
@@ -528,7 +538,7 @@ export function GenerationPanel({
                 <div className="py-2 px-3 bg-amber-50/50 border border-amber-200/60 rounded-xl flex items-center gap-2 text-xs text-amber-700/80">
                   <span className="text-amber-500">ℹ️</span>
                   <span className="text-[11px]">
-                    Нет заметок (создайте двойным кликом на канвасе)
+                    Заметки, прикреплённые к выделенным фото или лежащие рядом с ними, сами попадут в промпт. Новая заметка — двойной клик по доске.
                   </span>
                 </div>
               ) : (
@@ -589,7 +599,7 @@ export function GenerationPanel({
                   />
                   <div className="flex items-center gap-1.5 font-semibold text-xs text-gray-800">
                     <Package className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Режим замены продукта</span>
+                    <span>Поставить мой продукт в эту сцену</span>
                   </div>
                 </label>
                 {isProductReplacementMode && onOpenProducts && (
@@ -602,6 +612,9 @@ export function GenerationPanel({
                   </button>
                 )}
               </div>
+              <p className="mt-1 text-[10px] text-gray-500 leading-snug">
+                Сцена, свет и фон берутся с выделенных фото, а продукт — твой, из библиотеки.
+              </p>
 
               {isProductReplacementMode && (
                 <div className="mt-2 pt-2 border-t border-blue-100 space-y-1.5 animate-in fade-in duration-150">
@@ -912,17 +925,17 @@ export function GenerationPanel({
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1 text-gray-500">
                 <span className="font-semibold text-gray-700">
-                  Стиль референсов ({selectedCards.length}/5):
+                  Стиль с этих фото ({selectedCards.length}/5)
                 </span>
                 <span className="text-gray-400 text-[10px]">
-                  {selectedCards.length === 0 ? 'Без референсов' : 'Единый стиль для всех'}
+                  {selectedCards.length === 0 ? 'выделите фото на доске' : 'один стиль для всех'}
                 </span>
               </div>
 
               {selectedCards.length === 0 ? (
                 <div className="py-2 px-3 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex items-center justify-center gap-2 text-xs text-gray-500">
                   <ImageIcon className="w-3.5 h-3.5 text-gray-400" />
-                  <span className="text-[11px]">Кликните по референсам на канвасе для переноса стиля</span>
+                  <span className="text-[11px]">Выделите на доске 1–5 фото: их свет, фон и ракурс получат все продукты</span>
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5 overflow-x-auto p-1.5 bg-gray-50 border border-gray-200 rounded-xl custom-scrollbar">

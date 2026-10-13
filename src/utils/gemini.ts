@@ -1,10 +1,31 @@
 import { Card } from '../types';
+import { SOURCE_FIX_MARKER } from './storage';
 
 export const API_KEY_STORAGE_KEY = 'aips_api_key';
 export const STUDIO_PASSWORD_STORAGE_KEY = 'aips_studio_password';
 export const IMAGE_MODEL_STORAGE_KEY = 'aips_image_model';
-export const DEFAULT_IMAGE_MODEL = 'gemini-2.5-flash-image';
-export const TEXT_MODEL = 'gemini-2.5-flash';
+// Gemini 2.5 models are only served to accounts that used them before (Oct 2026),
+// so new keys get an error. Current stable models:
+export const DEFAULT_IMAGE_MODEL = 'gemini-nano-banana-2.1';
+export const TEXT_MODEL = 'gemini-3.8-flash';
+
+/** Image models offered in settings (any other gemini-* id can be typed in). */
+export const IMAGE_MODEL_OPTIONS: { id: string; note: string }[] = [
+  { id: 'gemini-nano-banana-2.1', note: 'основная, до 14 референсов' },
+  { id: 'gemini-3-pro-image', note: 'максимум качества и точности бренда, дороже' },
+  { id: 'gemini-3.1-flash-image', note: 'прошлое поколение' },
+  { id: 'gemini-3.1-flash-lite-image', note: 'самая дешёвая, 1K, один референс' },
+];
+
+/** Maps retired / restricted model ids to current ones, so old versions and settings keep working. */
+export function migrateModel(model: string): string {
+  const m = (model || '').trim();
+  if (!m) return m;
+  if (/^gemini-(1\.|2\.0|2\.5)/i.test(m)) {
+    return /image/i.test(m) ? DEFAULT_IMAGE_MODEL : TEXT_MODEL;
+  }
+  return m;
+}
 
 function readLocal(key: string): string {
   try {
@@ -45,7 +66,7 @@ export function setStudioPassword(password: string): void {
 }
 
 export function getImageModel(): string {
-  return readLocal(IMAGE_MODEL_STORAGE_KEY) || DEFAULT_IMAGE_MODEL;
+  return migrateModel(readLocal(IMAGE_MODEL_STORAGE_KEY)) || DEFAULT_IMAGE_MODEL;
 }
 
 export function setImageModel(model: string): void {
@@ -65,27 +86,25 @@ export class GeminiHttpError extends Error {
   }
 }
 
-/**
- * Sends a generateContent request either directly (personal key in this browser)
- * or through the private server proxy (/api/gemini) protected by the studio password.
- */
-export async function callGemini(
-  model: string,
-  payload: Record<string, unknown>,
-  apiKeyOverride?: string
-): Promise<any> {
-  const personalKey = (apiKeyOverride ?? getStoredApiKey()).trim();
-  let response: Response;
+type GeminiEndpoint = 'generateContent' | 'interactions';
 
+async function postGemini(
+  model: string,
+  body: Record<string, unknown>,
+  endpoint: GeminiEndpoint,
+  personalKey: string
+): Promise<{ ok: boolean; status: number; json: any }> {
+  let response: Response;
   if (personalKey) {
-    response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': personalKey },
-        body: JSON.stringify(payload),
-      }
-    );
+    const url =
+      endpoint === 'interactions'
+        ? 'https://generativelanguage.googleapis.com/v1beta/interactions'
+        : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': personalKey },
+      body: JSON.stringify(endpoint === 'interactions' ? { ...body, model } : body),
+    });
   } else {
     const password = getStudioPassword();
     if (!password) {
@@ -94,28 +113,113 @@ export async function callGemini(
     response = await fetch('/api/gemini', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-studio-password': password },
-      body: JSON.stringify({ model, payload }),
+      body: JSON.stringify({ model, payload: body, endpoint }),
     });
   }
-
   let json: any = null;
   try {
     json = await response.json();
   } catch {
     json = null;
   }
+  return { ok: response.ok, status: response.status, json };
+}
 
-  if (!response.ok) {
-    const msg = json?.error?.message || json?.error || `HTTP ${response.status}`;
-    if (response.status === 401) {
+function errorMessage(json: any, status: number): string {
+  const msg = json?.error?.message || json?.error || `HTTP ${status}`;
+  return typeof msg === 'string' ? msg : JSON.stringify(msg);
+}
+
+/** New models may only be served through the Interactions API. */
+function shouldTryInteractions(status: number, message: string): boolean {
+  if (status === 404) return true;
+  return status === 400 && /generateContent|interactions|not supported|unsupported|not found/i.test(message);
+}
+
+/** Converts a generateContent payload to an Interactions API request body. */
+export function toInteractionsBody(payload: Record<string, any>): Record<string, unknown> {
+  const parts: any[] = (payload?.contents || []).flatMap((c: any) => c?.parts || []);
+  const input = parts
+    .map((p) => {
+      if (typeof p?.text === 'string') return { type: 'text', text: p.text };
+      const inline = p?.inline_data || p?.inlineData;
+      if (inline?.data) return { type: 'image', data: inline.data, mime_type: inline.mime_type || inline.mimeType || 'image/jpeg' };
+      return null;
+    })
+    .filter(Boolean);
+  const gc = payload?.generationConfig || {};
+  const body: Record<string, unknown> = { input };
+  const generation: Record<string, unknown> = {};
+  if (typeof gc.temperature === 'number') generation.temperature = gc.temperature;
+  if (typeof gc.topP === 'number') generation.top_p = gc.topP;
+  if (Object.keys(generation).length) body.generation_config = generation;
+  const wantsImage =
+    Boolean(gc.imageConfig) || (Array.isArray(gc.responseModalities) && gc.responseModalities.some((m: string) => /image/i.test(m)));
+  if (wantsImage) {
+    const format: Record<string, unknown> = { type: 'image' };
+    if (gc.imageConfig?.aspectRatio) format.aspect_ratio = gc.imageConfig.aspectRatio;
+    if (gc.imageConfig?.imageSize) format.image_size = gc.imageConfig.imageSize;
+    body.response_format = format;
+  }
+  return body;
+}
+
+/** Turns an Interactions API response into the generateContent shape the rest of the app reads. */
+export function fromInteractionsResponse(json: any): any {
+  const blocks: any[] = [];
+  const steps: any[] = Array.isArray(json?.steps) ? json.steps : [];
+  const outputSteps = steps.filter((s) => s?.type === 'model_output');
+  const roots = outputSteps.length ? outputSteps : [json];
+  const seen = new Set<any>();
+  const walk = (node: any) => {
+    if (!node || typeof node !== 'object' || seen.has(node)) return;
+    seen.add(node);
+    if (node.type === 'thought') return;
+    if (node.type === 'image' && typeof node.data === 'string') {
+      blocks.push({ inlineData: { mimeType: node.mime_type || node.mimeType || 'image/png', data: node.data } });
+      return;
+    }
+    if (node.type === 'text' && typeof node.text === 'string') {
+      blocks.push({ text: node.text });
+      return;
+    }
+    for (const v of Array.isArray(node) ? node : Object.values(node)) walk(v);
+  };
+  roots.forEach(walk);
+  return { candidates: [{ content: { parts: blocks } }], _source: 'interactions' };
+}
+
+/**
+ * Sends a Gemini request either directly (personal key in this browser) or through the
+ * private server proxy (/api/gemini) protected by the studio password.
+ * Tries generateContent first and falls back to the Interactions API when the model needs it.
+ */
+export async function callGemini(
+  modelIn: string,
+  payload: Record<string, unknown>,
+  apiKeyOverride?: string
+): Promise<any> {
+  const model = migrateModel(modelIn);
+  const personalKey = (apiKeyOverride ?? getStoredApiKey()).trim();
+
+  let res = await postGemini(model, payload, 'generateContent', personalKey);
+  if (!res.ok && shouldTryInteractions(res.status, errorMessage(res.json, res.status))) {
+    const second = await postGemini(model, toInteractionsBody(payload as Record<string, any>), 'interactions', personalKey);
+    if (second.ok) return fromInteractionsResponse(second.json);
+    res = second;
+  }
+
+  if (!res.ok) {
+    const msg = errorMessage(res.json, res.status);
+    if (res.status === 401) {
       throw new GeminiHttpError('Неверный пароль студии (проверьте настройки)', 401);
     }
-    if (response.status === 413) {
+    if (res.status === 413) {
       throw new GeminiHttpError('Слишком большие картинки для запроса. Уменьшите фото.', 413);
     }
-    throw new GeminiHttpError(`Ошибка ${model}: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`, response.status);
+    throw new GeminiHttpError(`Ошибка ${model}: ${msg}`, res.status);
   }
-  return json;
+  return res.json;
 }
 
 /** Pulls the first image out of a generateContent response. */
@@ -274,7 +378,14 @@ export async function generateImageWithGemini(
   }
 ): Promise<GenerateImageResult> {
   let promptText = '';
-  if (options?.customPromptOverride) {
+  const isSourceFix = (userPrompt || '').includes(SOURCE_FIX_MARKER);
+  if (isSourceFix) {
+    // Edit the selected photo itself, never invent a new scene
+    const task = userPrompt.replace(SOURCE_FIX_MARKER, '').trim();
+    promptText =
+      'Отредактируй приложенное фото (первое изображение). Это то же самое фото того же предмета: ничего не придумывай, не меняй форму, пропорции, цвет, материал, надписи и логотипы предмета, не добавляй новых объектов. ' +
+      `Задача: ${task}`;
+  } else if (options?.customPromptOverride) {
     promptText = options.customPromptOverride.trim();
   } else if (options?.isProductReplacement) {
     promptText = `Замени продукт на фотографии на такой же, но в стиле приложенных референсов. Сохрани форму, цвет и текстуру продукта. ${userPrompt || ''}`.trim();
@@ -330,7 +441,7 @@ export async function generateImageWithGemini(
       },
     ],
     generationConfig: {
-      temperature: options?.temperature ?? 0.9,
+      temperature: options?.temperature ?? (isSourceFix ? 0.2 : 0.9),
       topP: 0.95,
       topK: 40,
       maxOutputTokens: 8192,

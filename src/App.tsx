@@ -28,7 +28,9 @@ import {
   saveMasterPrompts,
 } from './utils/storage';
 import { compressAndLoadImage, compressDataUrl, createSampleCard } from './utils/imageUtils';
-import { getStoredApiKey, hasGenerationAccess, generateImageWithGemini, analyzeStyleWithGemini } from './utils/gemini';
+import { getStoredApiKey, hasGenerationAccess, generateImageWithGemini, analyzeStyleWithGemini, getImageModel } from './utils/gemini';
+import { SOURCE_FIX_MARKER } from './utils/storage';
+import { isImageFile, normalizeImageFiles } from './utils/heic';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { Canvas } from './components/Canvas';
@@ -401,8 +403,8 @@ export default function App() {
         setStorageWarning('Память почти заполнена (>80%). Нажмите «Оптимизировать память»');
       }
 
-      const imageFiles = files.filter(
-        (f) => f.type.startsWith('image/') || f.name.match(/\.(png|jpe?g|webp|gif|svg)$/i)
+      const imageFiles = (await normalizeImageFiles(files.filter(isImageFile))).filter(
+        (f) => f.type.startsWith('image/') || f.name.match(/\.(png|jpe?g|webp|gif|svg|avif)$/i)
       );
       if (imageFiles.length === 0) return;
 
@@ -1090,7 +1092,7 @@ export default function App() {
   // Handle Gemini Image Generation
   const handleTriggerGeminiGeneration = async (
     prompt: string,
-    options?: { isProductReplacement?: boolean; selectedProduct?: ProductItem }
+    options?: { isProductReplacement?: boolean; selectedProduct?: ProductItem; masterPromptName?: string }
   ) => {
     const apiKey = getStoredApiKey();
     if (!hasGenerationAccess()) {
@@ -1151,10 +1153,37 @@ export default function App() {
         name: `Gemini_${new Date().toLocaleTimeString().replace(/:/g, '-')}.png`,
         aspectRatio: cardWidth / cardHeight,
         zIndex: maxZ + 1,
+        meta: {
+          kind: prompt.includes(SOURCE_FIX_MARKER) ? 'fix' : options?.isProductReplacement ? 'product' : 'generate',
+          prompt,
+          masterPromptName: options?.masterPromptName,
+          productName: options?.isProductReplacement ? options?.selectedProduct?.name : undefined,
+          model: getImageModel(),
+          sourceIds: selectedCards.map((c) => c.id),
+          createdAt: Date.now(),
+        },
       };
 
       const merged = [...currentCards, generatedCard];
-      handleUpdateCards(merged);
+      // "Made from" links: every selected source card → the new card
+      const autoConnections: Connection[] = selectedCards.slice(0, 5).map((c, i) => ({
+        id: `conn_auto_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`,
+        from: c.id,
+        to: generatedCard.id,
+        auto: true,
+      }));
+      saveProjectsToStorage(
+        projects.map((p) =>
+          p.id === activeProjectId
+            ? {
+                ...p,
+                cards: merged,
+                connections: [...(p.connections || []), ...autoConnections],
+                updatedAt: Date.now(),
+              }
+            : p
+        )
+      );
       setSelectedCardIds(new Set([generatedCard.id]));
       setSelectedNoteIds(new Set());
       setGenerationError(null);
@@ -1254,6 +1283,14 @@ export default function App() {
           name: `${product.name} (AI).png`,
           aspectRatio: cardWidth / cardHeight,
           zIndex: maxZ + 1 + i,
+          meta: {
+            kind: 'batch',
+            prompt: batchPrompt,
+            productName: product.name,
+            model: getImageModel(),
+            sourceIds: selectedCards.map((c) => c.id),
+            createdAt: Date.now(),
+          },
         };
 
         runningCards = [...runningCards, newCard];
@@ -1264,6 +1301,7 @@ export default function App() {
             id: `conn_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
             from: matchingCard.id,
             to: newCardId,
+            auto: true,
           };
           runningConnections = [...runningConnections, newConn];
         }
@@ -1689,7 +1727,7 @@ export default function App() {
         type="file"
         ref={fileInputRef}
         id="hidden-global-file-input"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         multiple
         onChange={handleFileInputChange}
         className="hidden"
@@ -1706,7 +1744,7 @@ export default function App() {
         type="file"
         ref={siteMockupInputRef}
         id="hidden-site-mockup-file-input"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         onChange={handleSiteMockupFileChange}
         className="hidden"
       />

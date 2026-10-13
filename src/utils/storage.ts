@@ -8,7 +8,69 @@ export const STORAGE_KEY_MASTER_PROMPTS = 'aips_master_prompts';
 export const STORAGE_KEY_GLOBAL_PRODUCTS = 'aips_products_library';
 export const STORAGE_KEY_API_KEY = 'aips_api_key';
 
+/**
+ * "Исправление исходника": edit the client's own photo instead of generating a new scene.
+ * Prompts starting with SOURCE_FIX_MARKER switch generation into careful edit mode.
+ */
+export const SOURCE_FIX_MARKER = '[ИСПРАВИТЬ ИСХОДНИК]';
+
+export const SOURCE_FIX_PROMPTS: MasterPrompt[] = [
+  {
+    id: 'mp_fix_all',
+    name: 'Исходник: поправить всё',
+    prompt: `${SOURCE_FIX_MARKER} Выровняй кадр (горизонт и перспектива), поставь предмет ровно, убери пыль, случайные царапины, пятна и отпечатки, исправь экспозицию, баланс белого и шум. Фон и композицию оставь.`,
+    tags: ['исходник', 'ретушь'],
+    createdAt: 1700000100000,
+  },
+  {
+    id: 'mp_fix_frame',
+    name: 'Исходник: выровнять кадр',
+    prompt: `${SOURCE_FIX_MARKER} Выровняй кадр: исправь завал горизонта, наклон и перспективные искажения (сходящиеся вертикали). Предмет по центру, ничего больше не меняй.`,
+    tags: ['исходник', 'геометрия'],
+    createdAt: 1700000101000,
+  },
+  {
+    id: 'mp_fix_object',
+    name: 'Исходник: выровнять предмет',
+    prompt: `${SOURCE_FIX_MARKER} Поставь сам предмет ровно: если он стоит криво, завален или повёрнут, выпрями его вертикально и симметрично, как на студийной съёмке. Форма, пропорции и детали те же.`,
+    tags: ['исходник', 'геометрия'],
+    createdAt: 1700000102000,
+  },
+  {
+    id: 'mp_fix_defects',
+    name: 'Исходник: убрать случайные дефекты',
+    prompt: `${SOURCE_FIX_MARKER} Убери то, что попало случайно: пыль, ворсинки, отпечатки пальцев, мелкие царапины и потёртости, разводы и пятна. Фактуру материала, задуманную состаренность, швы и все надписи оставь как есть.`,
+    tags: ['исходник', 'ретушь'],
+    createdAt: 1700000103000,
+  },
+  {
+    id: 'mp_fix_light',
+    name: 'Исходник: свет и цвет',
+    prompt: `${SOURCE_FIX_MARKER} Исправь только свет и цвет: экспозицию, баланс белого, цветовой оттенок, шум и резкость. Естественно, без пересвета и «пластика».`,
+    tags: ['исходник', 'цвет'],
+    createdAt: 1700000104000,
+  },
+];
+
+const SOURCE_FIX_ADDED_FLAG = 'aips_source_fix_prompts_v1';
+
+/** Adds the source-fix prompts once to libraries saved before they existed. */
+function withSourceFixPrompts(prompts: MasterPrompt[]): MasterPrompt[] {
+  try {
+    if (localStorage.getItem(SOURCE_FIX_ADDED_FLAG)) return prompts;
+    localStorage.setItem(SOURCE_FIX_ADDED_FLAG, '1');
+  } catch {
+    return prompts;
+  }
+  const missing = SOURCE_FIX_PROMPTS.filter((fp) => !prompts.some((p) => p.id === fp.id));
+  if (missing.length === 0) return prompts;
+  const merged = [...missing, ...prompts];
+  idbSet(STORAGE_KEY_MASTER_PROMPTS, merged).catch(() => {});
+  return merged;
+}
+
 export const DEFAULT_MASTER_PROMPTS: MasterPrompt[] = [
+  ...SOURCE_FIX_PROMPTS,
   {
     id: 'mp_dark_studio',
     name: 'Каталожный тёмный фон',
@@ -382,8 +444,9 @@ export async function loadMasterPromptsAsync(): Promise<MasterPrompt[]> {
   try {
     const fromIdb = await idbGet<MasterPrompt[]>(STORAGE_KEY_MASTER_PROMPTS);
     if (fromIdb && Array.isArray(fromIdb) && fromIdb.length > 0) {
-      inMemoryMasterPromptsCache = fromIdb;
-      return fromIdb;
+      const merged = withSourceFixPrompts(fromIdb);
+      inMemoryMasterPromptsCache = merged;
+      return merged;
     }
 
     const raw = localStorage.getItem(STORAGE_KEY_MASTER_PROMPTS);
