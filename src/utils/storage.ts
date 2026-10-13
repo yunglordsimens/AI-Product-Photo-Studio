@@ -402,16 +402,32 @@ export async function optimizeAllProjectsMemory(): Promise<{
   };
 }
 
-export function exportProjectToJson(project: Project): void {
-  const dataStr =
-    'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(project, null, 2));
+/**
+ * Saves the project as JSON. Master prompts live outside projects (one library per
+ * browser), so they are written into the file too; import merges them back.
+ */
+export function exportProjectToJson(project: Project, masterPrompts: MasterPrompt[] = []): void {
+  const payload = { ...project, masterPrompts, exportedAt: Date.now(), format: 'aips-project-v2' };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
   const downloadAnchor = document.createElement('a');
-  downloadAnchor.setAttribute('href', dataStr);
+  downloadAnchor.setAttribute('href', url);
   const cleanName = project.name.replace(/[^a-z0-9а-яё]/gi, '_').toLowerCase() || 'project';
   downloadAnchor.setAttribute('download', `${cleanName}_${Date.now()}.json`);
   document.body.appendChild(downloadAnchor);
   downloadAnchor.click();
   downloadAnchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+/** Adds prompts from an imported file that this browser doesn't have yet (same id or same text = same prompt). */
+export function mergeMasterPrompts(current: MasterPrompt[], incoming: unknown): { merged: MasterPrompt[]; added: number } {
+  if (!Array.isArray(incoming)) return { merged: current, added: 0 };
+  const valid = incoming.filter(
+    (p): p is MasterPrompt => p && typeof p === 'object' && typeof p.id === 'string' && typeof p.prompt === 'string'
+  );
+  const missing = valid.filter((p) => !current.some((c) => c.id === p.id || c.prompt.trim() === p.prompt.trim()));
+  return { merged: [...current, ...missing], added: missing.length };
 }
 
 export function parseProjectJson(file: File): Promise<Project> {

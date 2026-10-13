@@ -15,6 +15,14 @@ window.addEventListener(
 for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
   document.addEventListener(type, (e) => e.preventDefault());
 }
+// iOS / iPadOS ignore user-scalable=no: block two-finger page zoom; the canvas still gets the touches.
+document.addEventListener(
+  'touchmove',
+  (e) => {
+    if (e.touches.length > 1) e.preventDefault();
+  },
+  { passive: false }
+);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

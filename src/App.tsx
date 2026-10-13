@@ -21,6 +21,7 @@ import {
   getStorageUsageAsync,
   exportProjectToJson,
   parseProjectJson,
+  mergeMasterPrompts,
   clearAllMemory,
   optimizeAllProjectsMemory,
   loadMasterPrompts,
@@ -1363,8 +1364,8 @@ export default function App() {
 
   // Export JSON
   const handleExportProject = useCallback(() => {
-    exportProjectToJson(activeProject);
-  }, [activeProject]);
+    exportProjectToJson(activeProject, masterPrompts);
+  }, [activeProject, masterPrompts]);
 
   // Import JSON
   const handleImportProjectClick = () => {
@@ -1375,11 +1376,23 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const imported = await parseProjectJson(file);
+      const parsed = (await parseProjectJson(file)) as Project & { masterPrompts?: unknown; exportedAt?: number; format?: string };
+      const { masterPrompts: importedPrompts, exportedAt: _e, format: _f, ...projectOnly } = parsed;
+      const imported: Project = { ...projectOnly };
+      // Importing the same file twice must not create two projects with one id
+      if (projects.some((p) => p.id === imported.id)) {
+        imported.id = `proj_${Date.now()}`;
+        imported.name = `${imported.name} (импорт)`;
+      }
       const updated = [...projects, imported];
       saveProjectsToStorage(updated);
       handleSelectProject(imported.id);
-      window.alert(`Проект "${imported.name}" успешно загружен!`);
+      const { merged, added } = mergeMasterPrompts(masterPrompts, importedPrompts);
+      if (added > 0) handleSaveMasterPrompts(merged);
+      window.alert(
+        `Проект "${imported.name}" загружен.` +
+          (added > 0 ? ` Добавлено мастер-промптов: ${added}.` : importedPrompts ? '' : ' В этом файле нет мастер-промптов (он сохранён старой версией).')
+      );
     } catch (err) {
       window.alert('Ошибка при импорте файла проекта. Проверьте формат JSON.');
     }
