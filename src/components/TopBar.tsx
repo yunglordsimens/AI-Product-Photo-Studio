@@ -270,24 +270,48 @@ export const TopBar: React.FC<TopBarProps> = ({
     ) },
   ];
 
-  const orderedToolbar = [...toolbarItems].sort((a, b) => {
+  const visibleToolbar = toolbarItems.filter((i) => i.id !== 'group' || (canGroup && onGroupSelected));
+  const orderedToolbar = [...visibleToolbar].sort((a, b) => {
     const ia = toolbarOrder.indexOf(a.id);
     const ib = toolbarOrder.indexOf(b.id);
     return (ia < 0 ? 100 + toolbarItems.indexOf(a) : ia) - (ib < 0 ? 100 + toolbarItems.indexOf(b) : ib);
   });
+  // Live reorder while dragging: neighbours slide aside (FLIP animation); saved when the drag ends
+  const itemRefs = React.useRef(new Map<string, HTMLDivElement>());
+  const lastRects = React.useRef(new Map<string, DOMRect>());
   const moveToolbarItem = (fromId: string, toId: string) => {
     const ids = orderedToolbar.map((i) => i.id);
     const from = ids.indexOf(fromId);
     const to = ids.indexOf(toId);
-    if (from < 0 || to < 0) return;
+    if (from < 0 || to < 0 || from === to) return;
+    itemRefs.current.forEach((el, id) => lastRects.current.set(id, el.getBoundingClientRect()));
     ids.splice(to, 0, ids.splice(from, 1)[0]);
     setToolbarOrder(ids);
+  };
+  const persistToolbarOrder = () => {
     try {
-      localStorage.setItem('aips_toolbar_order', JSON.stringify(ids));
+      localStorage.setItem('aips_toolbar_order', JSON.stringify(orderedToolbar.map((i) => i.id)));
     } catch {
       /* private mode */
     }
   };
+  React.useLayoutEffect(() => {
+    if (lastRects.current.size === 0) return;
+    itemRefs.current.forEach((el, id) => {
+      const before = lastRects.current.get(id);
+      if (!before) return;
+      const after = el.getBoundingClientRect();
+      const dx = before.left - after.left;
+      if (!dx) return;
+      el.style.transition = 'none';
+      el.style.transform = `translateX(${dx}px)`;
+      requestAnimationFrame(() => {
+        el.style.transition = 'transform 180ms ease';
+        el.style.transform = '';
+      });
+    });
+    lastRects.current.clear();
+  }, [toolbarOrder]);
 
   return (
     <header
@@ -341,18 +365,28 @@ export const TopBar: React.FC<TopBarProps> = ({
               setDragId(item.id);
               e.dataTransfer.effectAllowed = 'move';
             }}
+            ref={(el) => {
+              if (el) itemRefs.current.set(item.id, el);
+              else itemRefs.current.delete(item.id);
+            }}
+            onDragEnter={() => {
+              if (dragId && dragId !== item.id) moveToolbarItem(dragId, item.id);
+            }}
             onDragOver={(e) => {
-              if (dragId && dragId !== item.id) e.preventDefault();
+              if (dragId) e.preventDefault();
             }}
             onDrop={(e) => {
               e.preventDefault();
-              if (dragId) moveToolbarItem(dragId, item.id);
+              persistToolbarOrder();
               setDragId(null);
             }}
-            onDragEnd={() => setDragId(null)}
-            className={`${item.desktopOnly ? 'hidden lg:flex' : 'flex'} items-center gap-1 sm:gap-1.5 ${
-              dragId === item.id ? 'opacity-40' : ''
-            }`}
+            onDragEnd={() => {
+              persistToolbarOrder();
+              setDragId(null);
+            }}
+            className={`${item.desktopOnly ? 'hidden lg:flex' : 'flex'} items-center gap-1 sm:gap-1.5 rounded-lg ${
+              dragId === item.id ? 'opacity-30 outline outline-2 outline-dashed outline-gray-300' : ''
+            } ${dragId ? 'cursor-grabbing' : ''}`}
             title="Перетащи, чтобы поменять порядок кнопок"
           >
             {item.node}
