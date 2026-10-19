@@ -1,15 +1,16 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 
-export type CropAspectRatio = '1:1' | '4:3' | '3:4' | '4:5' | '16:9' | '9:16' | 'free';
+export type CropAspectRatio = 'original' | '1:1' | '4:3' | '3:4' | '4:5' | '16:9' | '9:16' | 'free';
 
-/** Width / height for a crop preset, or null for free cropping. */
+/** Width / height for a crop preset, or null for free cropping and for 'original' (the photo's own ratio, i.e. no crop). */
 export function cropRatioValue(r: CropAspectRatio): number | null {
-  if (r === 'free') return null;
+  if (r === 'free' || r === 'original') return null;
   const [w, h] = r.split(':').map(Number);
   return w / h;
 }
 
-const CROP_PRESETS: { id: CropAspectRatio; title: string }[] = [
+const CROP_PRESETS: { id: CropAspectRatio; title: string; label?: string }[] = [
+  { id: 'original', title: 'Пропорции оригинала', label: 'Оригинал' },
   { id: '1:1', title: 'Квадрат 1:1' },
   { id: '4:3', title: 'Горизонталь 4:3' },
   { id: '3:4', title: 'Вертикаль 3:4' },
@@ -37,7 +38,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
   isOpen,
   imageSrc,
   imageName,
-  initialAspectRatio = '1:1',
+  initialAspectRatio = 'original',
   queueInfo,
   onSave,
   onCancel,
@@ -69,6 +70,10 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
   }>({ x: 0, y: 0, width: 0, height: 0 });
 
   const containerRef = useRef<HTMLDivElement>(null);
+  // Zoom and pan of the whole picture (image + crop box together), to look closely at an edge
+  const [view, setView] = useState<{ z: number; x: number; y: number }>({ z: 1, x: 0, y: 0 });
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const imageRef = useRef<HTMLImageElement>(null);
 
   // Drag tracking refs
@@ -91,6 +96,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     if (isOpen) {
       setAspectRatio(initialAspectRatio);
       setRotation(0);
+      setView({ z: 1, x: 0, y: 0 });
     }
   }, [isOpen, imageSrc, initialAspectRatio]);
 
@@ -117,7 +123,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     const effNaturalW = isRotated90 ? naturalSize.height : naturalSize.width;
     const effNaturalH = isRotated90 ? naturalSize.width : naturalSize.height;
 
-    const padding = 16;
+    const padding = 6;
     const maxW = Math.max(100, containerW - padding * 2);
     const maxH = Math.max(100, containerH - padding * 2);
 
@@ -134,8 +140,8 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
       top: dispTop,
     });
 
-    // Initialize crop box according to aspect ratio
-    const targetRatio: number | null = cropRatioValue(aspectRatio);
+    // Start on the whole photo (or the largest box of the chosen ratio), no margin
+    const targetRatio: number | null = aspectRatio === 'original' ? effNaturalW / effNaturalH : cropRatioValue(aspectRatio);
 
     let cropW = dispW;
     let cropH = dispH;
@@ -148,16 +154,8 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
       }
     }
 
-    const marginScale = 0.94;
-    cropW = Math.max(30, Math.round(cropW * marginScale));
-    cropH = Math.max(30, Math.round(cropH * marginScale));
-    if (targetRatio !== null) {
-      if (cropW / cropH > targetRatio) {
-        cropW = Math.round(cropH * targetRatio);
-      } else {
-        cropH = Math.round(cropW / targetRatio);
-      }
-    }
+    cropW = Math.max(30, cropW);
+    cropH = Math.max(30, cropH);
 
     const cropX = Math.max(0, Math.round((dispW - cropW) / 2));
     const cropY = Math.max(0, Math.round((dispH - cropH) / 2));
@@ -185,10 +183,22 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     return () => window.removeEventListener('resize', handleResize);
   }, [updateLayoutAndCrop]);
 
+  /** The ratio to hold for a preset; 'original' = the displayed photo's own ratio */
+  const ratioFor = (ratio: CropAspectRatio): number | null =>
+    ratio === 'original'
+      ? imageLayout.width > 0 && imageLayout.height > 0
+        ? imageLayout.width / imageLayout.height
+        : null
+      : cropRatioValue(ratio);
+
   // Switch aspect ratio
   const handleSelectAspectRatio = (ratio: CropAspectRatio) => {
     setAspectRatio(ratio);
     if (imageLayout.width === 0 || imageLayout.height === 0) return;
+    if (ratio === 'original') {
+      setCropBox({ x: 0, y: 0, width: imageLayout.width, height: imageLayout.height });
+      return;
+    }
 
     const targetRatio: number | null = cropRatioValue(ratio);
 
@@ -250,14 +260,15 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     e.preventDefault();
 
     const { handle, startX, startY, startCrop } = dragRef.current;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
+    // Screen pixels → picture pixels when zoomed in
+    const dx = (e.clientX - startX) / viewRef.current.z;
+    const dy = (e.clientY - startY) / viewRef.current.z;
 
     const minSize = 20;
     const maxW = imageLayout.width;
     const maxH = imageLayout.height;
 
-    const targetRatio: number | null = cropRatioValue(aspectRatio);
+    const targetRatio: number | null = ratioFor(aspectRatio);
 
     if (handle === 'move') {
       let nextX = startCrop.x + dx;
@@ -374,7 +385,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
 
       if (sw <= 0 || sh <= 0) return;
 
-      const maxDim = 800;
+      const maxDim = 1600;
       let outW = sw;
       let outH = sh;
       if (outW > maxDim || outH > maxDim) {
@@ -398,11 +409,101 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
 
       outCtx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, outW, outH);
 
-      const croppedDataUrl = outCanvas.toDataURL('image/jpeg', 0.85);
+      const croppedDataUrl = outCanvas.toDataURL('image/jpeg', 0.9);
       onSave(croppedDataUrl, outW, outH);
     };
     img.src = imageSrc;
   };
+
+  // Zoom: trackpad pinch / Ctrl+wheel around the cursor, wheel pans when zoomed, Safari gestures, two-finger touch pinch
+  const zoomAt = useCallback((nextZ: number, clientX: number, clientY: number) => {
+    const el = containerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const v = viewRef.current;
+    const z = Math.min(8, Math.max(1, nextZ));
+    if (z === 1) {
+      setView({ z: 1, x: 0, y: 0 });
+      return;
+    }
+    const dX = clientX - (r.left + r.width / 2);
+    const dY = clientY - (r.top + r.height / 2);
+    setView({ z, x: dX - (z / v.z) * (dX - v.x), y: dY - (z / v.z) * (dY - v.y) });
+  }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !isOpen) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const v = viewRef.current;
+      if (e.ctrlKey || e.metaKey) {
+        const delta = Math.max(-40, Math.min(40, e.deltaY));
+        zoomAt(v.z * Math.exp(-delta * 0.006), e.clientX, e.clientY);
+      } else if (v.z > 1) {
+        setView({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY });
+      }
+    };
+    let gestureStartZ = 1;
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      gestureStartZ = viewRef.current.z;
+    };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      const ge = e as Event & { scale: number; clientX: number; clientY: number };
+      zoomAt(gestureStartZ * ge.scale, ge.clientX, ge.clientY);
+    };
+    let pinch: { dist: number; z: number } | null = null;
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) pinch = { dist: dist(e.touches), z: viewRef.current.z };
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinch) {
+        e.preventDefault();
+        const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        zoomAt(pinch.z * (dist(e.touches) / pinch.dist), cx, cy);
+      }
+    };
+    const onTouchEnd = () => {
+      pinch = null;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('gesturestart', onGestureStart as EventListener, { passive: false } as AddEventListenerOptions);
+    el.addEventListener('gesturechange', onGestureChange as EventListener, { passive: false } as AddEventListenerOptions);
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('gesturestart', onGestureStart as EventListener);
+      el.removeEventListener('gesturechange', onGestureChange as EventListener);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [isOpen, zoomAt]);
+
+  // Enter saves, Esc closes
+  const saveRef = useRef<() => void>(() => {});
+  const cancelRef = useRef(onCancel);
+  cancelRef.current = onCancel;
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        saveRef.current();
+      } else if (e.key === 'Escape') {
+        cancelRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen]);
+  saveRef.current = handleSaveCrop;
 
   if (!isOpen) return null;
 
@@ -413,13 +514,13 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
   return (
     <div
       id="image-crop-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 select-none"
+      className="fixed inset-0 z-50 flex bg-white select-none ofst-fade"
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
       <div
         id="image-crop-modal-card"
-        className="bg-white text-[var(--fg)] w-full max-w-4xl max-h-[96vh] flex flex-col overflow-hidden p-2 gap-2"
+        className="bg-white text-[var(--fg)] w-full h-full flex flex-col overflow-hidden p-2 gap-1"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Running line: what, which one, file */}
@@ -437,7 +538,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
               className={`ofst-cell ${aspectRatio === preset.id ? 'is-on' : ''}`}
               title={preset.title}
             >
-              {preset.id}
+              {preset.label || preset.id}
             </button>
           ))}
           <button
@@ -449,6 +550,16 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
           </button>
           <button onClick={handleRotate} className="ofst-cell" title="Повернуть на 90°">
             Повернуть
+          </button>
+          <span className="w-2" />
+          <button onClick={() => { const r = containerRef.current?.getBoundingClientRect(); if (r) zoomAt(view.z / 1.5, r.left + r.width / 2, r.top + r.height / 2); }} className="ofst-cell w-7" title="Отдалить">
+            −
+          </button>
+          <button onClick={() => setView({ z: 1, x: 0, y: 0 })} className="ofst-cell tabular-nums" title="Вписать (двойной клик по фону)">
+            {Math.round(view.z * 100)}%
+          </button>
+          <button onClick={() => { const r = containerRef.current?.getBoundingClientRect(); if (r) zoomAt(view.z * 1.5, r.left + r.width / 2, r.top + r.height / 2); }} className="ofst-cell w-7" title="Приблизить (или щипок на трекпаде)">
+            +
           </button>
           <span className="flex-1" />
           {isBatch && onApplyToAllRemaining && (
@@ -475,7 +586,10 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
           ref={containerRef}
           id="crop-viewport-container"
           style={{ touchAction: 'none' }}
-          className="relative flex-1 min-h-[260px] max-h-[62vh] sm:max-h-[70vh] bg-[var(--soft)] flex items-center justify-center overflow-hidden p-2 select-none"
+          className="relative flex-1 min-h-0 bg-[var(--soft)] flex items-center justify-center overflow-hidden select-none"
+          onDoubleClick={(e) => {
+            if (e.target === e.currentTarget) setView({ z: 1, x: 0, y: 0 });
+          }}
         >
           {imageSrc && imageLayout.width > 0 && (
             <div
@@ -483,6 +597,8 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
               style={{
                 width: imageLayout.width,
                 height: imageLayout.height,
+                transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`,
+                transition: 'transform 60ms linear',
               }}
             >
               <img

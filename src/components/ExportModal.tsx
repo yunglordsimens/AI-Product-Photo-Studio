@@ -55,7 +55,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   };
 
   return (
-    <div id="modal-export-backdrop" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-2" onClick={onClose}>
+    <div id="modal-export-backdrop" className="fixed inset-0 bg-black/40 ofst-fade z-50 flex items-center justify-center p-2" onClick={onClose}>
       <div id="modal-export-content" className="bg-white max-w-md w-full p-2 text-[var(--fg)]" onClick={(e) => e.stopPropagation()}>
         <div className="ofst-run">
           <span>Экспорт</span>

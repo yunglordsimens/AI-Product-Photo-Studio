@@ -90,6 +90,34 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--fg); outlin
 .ofst-cell:disabled { opacity: .4; cursor: default; }
 .ofst-cell--muted { color: var(--grey); }
 .ofst-cell--muted:hover { color: var(--fg); }
+
+/* Side panel: white column with a quiet grey edge, so stacked panels read as separate sheets */
+.ofst-panel { background: var(--bg); border-left: 1px solid var(--soft-2); }
+
+/* Dock slots: each panel has a comfortable width, squeezes to a minimum, then the dock scrolls */
+.ofst-dock-slot { flex: 0 1 auto; animation: ofst-slide-in .22s cubic-bezier(.2, .7, .1, 1); }
+.ofst-dock-slot--products { width: 640px; min-width: 420px; }
+.ofst-dock-slot--ai { width: 400px; min-width: 340px; }
+.ofst-dock-slot--menu { width: 280px; min-width: 240px; }
+@media (max-width: 767px) {
+  .ofst-dock-slot { width: 100vw !important; min-width: 100vw !important; }
+}
+
+/* A position row / slot under a photo dragged from the board */
+td.ofst-drop-target > div { outline: 2px solid var(--fg); outline-offset: -2px; background: var(--marker) !important; }
+td.ofst-drop-target button { background: transparent !important; }
+tr.ofst-drop-target > td { background: var(--marker); }
+
+/* Micro-motion: short, one direction, nothing bouncy */
+.ofst-fade { animation: ofst-fade .16s ease-out; }
+.ofst-pop { animation: ofst-pop .14s cubic-bezier(.2, .7, .1, 1); transform-origin: top left; }
+}
+
+@keyframes ofst-slide-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@keyframes ofst-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ofst-pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .ofst-dock-slot, .ofst-fade, .ofst-pop { animation: none; }
 }
 
 /* No rounded corners anywhere, no soft glass blur */

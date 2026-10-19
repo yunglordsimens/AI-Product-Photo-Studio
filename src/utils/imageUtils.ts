@@ -4,9 +4,9 @@
 
 export async function compressAndLoadImage(
   file: File,
-  maxWidth = 800,
-  maxHeight = 800,
-  quality = 0.85
+  maxWidth = 1600,
+  maxHeight = 1600,
+  quality = 0.88
 ): Promise<{ src: string; width: number; height: number; name: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -67,8 +67,8 @@ export async function compressAndLoadImage(
  */
 export async function compressDataUrl(
   dataUrl: string,
-  maxWidth = 800,
-  maxHeight = 800,
+  maxWidth = 1600,
+  maxHeight = 1600,
   quality = 0.82
 ): Promise<string> {
   if (!dataUrl || !dataUrl.startsWith('data:image')) {

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { MasterPrompt } from '../types';
+import { PROMPT_CATEGORIES, groupPrompts, promptCategory } from '../utils/promptCategories';
 
 interface MasterPromptsModalProps {
   isOpen: boolean;
@@ -7,6 +8,8 @@ interface MasterPromptsModalProps {
   masterPrompts: MasterPrompt[];
   onSaveMasterPrompts: (prompts: MasterPrompt[]) => void;
   onSelectPromptForGen?: (promptText: string) => void;
+  projectId?: string;
+  projectName?: string;
 }
 
 export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
@@ -15,6 +18,8 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
   masterPrompts,
   onSaveMasterPrompts,
   onSelectPromptForGen,
+  projectId,
+  projectName,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingPrompt, setEditingPrompt] = useState<MasterPrompt | null>(null);
@@ -24,6 +29,9 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
   const [formName, setFormName] = useState('');
   const [formText, setFormText] = useState('');
   const [formTags, setFormTags] = useState('');
+  const [formCategory, setFormCategory] = useState('Мои');
+  const [formProjectOnly, setFormProjectOnly] = useState(false);
+  const [shelf, setShelf] = useState<string>('Все');
   const [formError, setFormError] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -34,6 +42,8 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
     setFormName('');
     setFormText('');
     setFormTags('');
+    setFormCategory(shelf !== 'Все' && shelf !== 'Этот проект' ? shelf : 'Мои');
+    setFormProjectOnly(shelf === 'Этот проект');
     setFormError('');
     setIsCreatingNew(true);
   };
@@ -43,6 +53,8 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
     setFormName(p.name);
     setFormText(p.prompt);
     setFormTags((p.tags || []).join(', '));
+    setFormCategory(promptCategory(p));
+    setFormProjectOnly(Boolean(p.projectId));
     setFormError('');
     setIsCreatingNew(false);
   };
@@ -77,6 +89,8 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
               name: formName.trim(),
               prompt: formText.trim(),
               tags: parsedTags,
+              category: formCategory.trim() || 'Мои',
+              projectId: formProjectOnly ? p.projectId || projectId : undefined,
             }
           : p
       );
@@ -87,6 +101,8 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
         name: formName.trim(),
         prompt: formText.trim(),
         tags: parsedTags,
+        category: formCategory.trim() || 'Мои',
+        projectId: formProjectOnly ? projectId : undefined,
         createdAt: Date.now(),
       };
       onSaveMasterPrompts([newPrompt, ...masterPrompts]);
@@ -111,18 +127,21 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
     setTimeout(() => setCopiedId(null), 1500);
   };
 
-  const filteredPrompts = masterPrompts.filter((p) => {
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return true;
-    return (
-      p.name.toLowerCase().includes(q) ||
-      p.prompt.toLowerCase().includes(q) ||
-      (p.tags && p.tags.some((t) => t.toLowerCase().includes(q)))
-    );
-  });
+  const q = searchQuery.toLowerCase().trim();
+  const matches = (p: MasterPrompt) =>
+    !q ||
+    p.name.toLowerCase().includes(q) ||
+    p.prompt.toLowerCase().includes(q) ||
+    (p.tags || []).some((t) => t.toLowerCase().includes(q));
+  const shelves = groupPrompts(masterPrompts, projectId);
+  const shownShelves = shelves
+    .filter((g) => shelf === 'Все' || g.title === shelf)
+    .map((g) => ({ ...g, items: g.items.filter(matches) }))
+    .filter((g) => g.items.length > 0);
+  const filteredPrompts = shownShelves.flatMap((g) => g.items);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/40 ofst-fade" onClick={onClose}>
       <div className="bg-white w-full max-w-3xl flex flex-col max-h-[94vh] p-2 gap-2" onClick={(e) => e.stopPropagation()}>
         {/* Head */}
         <div className="ofst-run shrink-0">
@@ -154,6 +173,20 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
           </div>
         )}
 
+        {/* Shelves */}
+        {!isCreatingNew && !editingPrompt && (
+          <div className="flex flex-wrap shrink-0 -mx-0.5">
+            {['Все', ...shelves.map((g) => g.title)].map((t) => (
+              <button key={t} onClick={() => setShelf(t)} className={`ofst-cell !h-7 ${shelf === t ? 'is-on' : 'ofst-cell--muted'}`}>
+                {t}
+                <span className="opacity-60 tabular-nums">
+                  {t === 'Все' ? shelves.reduce((n, g) => n + g.items.length, 0) : shelves.find((g) => g.title === t)?.items.length}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Create / edit */}
         {(isCreatingNew || editingPrompt) && (
           <form onSubmit={handleSaveForm} className="space-y-2 shrink-0">
@@ -176,6 +209,33 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
               placeholder="Фон, окружение, свет, детали…"
               className="w-full p-2 text-[13px] resize-y leading-snug"
             />
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <label className="flex items-center gap-1 text-[12px] text-[var(--grey)]">
+                Полка
+                <input
+                  list="mp-shelves"
+                  value={formCategory}
+                  onChange={(e) => setFormCategory(e.target.value)}
+                  className="h-7 px-2 text-[13px] text-[var(--fg)] w-40"
+                />
+                <datalist id="mp-shelves">
+                  {PROMPT_CATEGORIES.map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
+              </label>
+              {projectId && (
+                <label className="flex items-center gap-1.5 text-[12px] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formProjectOnly}
+                    onChange={(e) => setFormProjectOnly(e.target.checked)}
+                    className="accent-black w-3.5 h-3.5"
+                  />
+                  только для проекта «{projectName}»
+                </label>
+              )}
+            </div>
             <input
               type="text"
               value={formTags}
@@ -201,43 +261,55 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
               {searchQuery ? 'Ничего не найдено.' : 'Пока пусто. «+ Новый» сохранит шаблон.'}
             </p>
           ) : (
-            <ol>
-              {filteredPrompts.map((item, idx) => (
-                <li key={item.id} className="group grid grid-cols-[28px_minmax(0,1fr)_auto] gap-x-2 py-1.5 hover:bg-[var(--soft)]">
-                  <span className="text-[12px] tabular-nums text-[var(--grey)] pl-1 pt-px">{String(idx + 1).padStart(2, '0')}</span>
-                  <div className="min-w-0">
-                    <h4 className="text-[13px] font-medium leading-tight">{item.name}</h4>
-                    <p className="text-[12px] text-[var(--grey)] leading-snug line-clamp-2 select-text">{item.prompt}</p>
-                    {item.tags && item.tags.length > 0 && (
-                      <p className="text-[11px] text-[var(--grey)] pt-0.5">{item.tags.join(' · ')}</p>
-                    )}
-                  </div>
-                  <div className="flex items-start text-[12px]">
-                    {onSelectPromptForGen && (
-                      <button
-                        onClick={() => {
-                          onSelectPromptForGen(item.prompt);
-                          onClose();
-                        }}
-                        className="ofst-cell ofst-cell--primary !h-6 !text-[12px]"
-                        title="Вставить в форму генерации"
-                      >
-                        Применить
-                      </button>
-                    )}
-                    <button onClick={() => handleCopyText(item)} className="ofst-cell ofst-cell--muted !h-6 !text-[12px]" title="Скопировать текст">
-                      {copiedId === item.id ? 'скопировано' : 'копия'}
-                    </button>
-                    <button onClick={() => handleStartEdit(item)} className="ofst-cell ofst-cell--muted !h-6 !text-[12px]" title="Редактировать">
-                      изменить
-                    </button>
-                    <button onClick={() => handleDelete(item)} className="ofst-cell ofst-cell--muted !h-6 !text-[12px] hover:!bg-[var(--marker)]" title="Удалить">
-                      удалить
-                    </button>
-                  </div>
-                </li>
+            <div className="space-y-3">
+              {shownShelves.map((g) => (
+                <section key={g.title}>
+                  {shelf === 'Все' && (
+                    <div className="ofst-run mb-0.5">
+                      <span>{g.title}</span>
+                      <span>{g.items.length}</span>
+                    </div>
+                  )}
+                  <ol>
+                    {g.items.map((item, idx) => (
+                    <li key={item.id} className="group grid grid-cols-[28px_minmax(0,1fr)_auto] gap-x-2 py-1.5 hover:bg-[var(--soft)]">
+                      <span className="text-[12px] tabular-nums text-[var(--grey)] pl-1 pt-px">{String(idx + 1).padStart(2, '0')}</span>
+                      <div className="min-w-0">
+                        <h4 className="text-[13px] font-medium leading-tight">{item.name}</h4>
+                        <p className="text-[12px] text-[var(--grey)] leading-snug line-clamp-2 select-text">{item.prompt}</p>
+                        {item.tags && item.tags.length > 0 && (
+                          <p className="text-[11px] text-[var(--grey)] pt-0.5">{item.tags.join(' · ')}</p>
+                        )}
+                      </div>
+                      <div className="flex items-start text-[12px]">
+                        {onSelectPromptForGen && (
+                          <button
+                            onClick={() => {
+                              onSelectPromptForGen(item.prompt);
+                              onClose();
+                            }}
+                            className="ofst-cell ofst-cell--primary !h-6 !text-[12px]"
+                            title="Вставить в форму генерации"
+                          >
+                            Применить
+                          </button>
+                        )}
+                        <button onClick={() => handleCopyText(item)} className="ofst-cell ofst-cell--muted !h-6 !text-[12px]" title="Скопировать текст">
+                          {copiedId === item.id ? 'скопировано' : 'копия'}
+                        </button>
+                        <button onClick={() => handleStartEdit(item)} className="ofst-cell ofst-cell--muted !h-6 !text-[12px]" title="Редактировать">
+                          изменить
+                        </button>
+                        <button onClick={() => handleDelete(item)} className="ofst-cell ofst-cell--muted !h-6 !text-[12px] hover:!bg-[var(--marker)]" title="Удалить">
+                          удалить
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                  </ol>
+                </section>
               ))}
-            </ol>
+            </div>
           )}
         </div>
       </div>

@@ -19,7 +19,7 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({ card, onCl
   };
 
   return (
-    <div id="modal-image-preview-backdrop" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-2" onClick={onClose}>
+    <div id="modal-image-preview-backdrop" className="fixed inset-0 bg-black/40 ofst-fade z-50 flex items-center justify-center p-2" onClick={onClose}>
       <div
         id="modal-image-preview-content"
         className="relative max-w-5xl max-h-[96vh] bg-white flex flex-col p-2 gap-1"

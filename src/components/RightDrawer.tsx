@@ -25,6 +25,9 @@ interface RightDrawerProps {
   isOptimizing?: boolean;
   onToggleGeneration: () => void;
   isGenerationOpen: boolean;
+  toolLabels: { id: string; label: string }[];
+  hiddenTools: string[];
+  onToggleTool: (id: string) => void;
 }
 
 export const RightDrawer: React.FC<RightDrawerProps> = ({
@@ -51,6 +54,9 @@ export const RightDrawer: React.FC<RightDrawerProps> = ({
   isOptimizing = false,
   onToggleGeneration,
   isGenerationOpen,
+  toolLabels,
+  hiddenTools,
+  onToggleTool,
 }) => {
   if (!isOpen) return null;
 
@@ -62,11 +68,13 @@ export const RightDrawer: React.FC<RightDrawerProps> = ({
   const row = 'w-full flex items-baseline justify-between gap-2 px-1 h-8 text-left text-[13px] hover:bg-[var(--soft)] disabled:opacity-40';
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="fixed inset-0" onClick={onClose} />
-
-      {/* Menu: a plain index under the top bar, no frames */}
-      <div id="right-actions-drawer" className="relative mt-10 w-full max-w-xs bg-white h-[calc(100%-40px)] flex flex-col z-10 p-2">
+      <div id="right-actions-drawer" className="ofst-panel h-full flex flex-col p-2">
+        <div className="ofst-run shrink-0 mb-2">
+          <span>Меню</span>
+          <button onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer">
+            закрыть
+          </button>
+        </div>
         <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
           {/* Same as the top bar on desktop, so only on smaller screens */}
           <div className="lg:hidden">
@@ -123,6 +131,22 @@ export const RightDrawer: React.FC<RightDrawerProps> = ({
 
           <div>
             <div className="ofst-run mb-0.5">
+              <span>Кнопки сверху</span>
+              <span>{toolLabels.length - hiddenTools.length} из {toolLabels.length}</span>
+            </div>
+            {toolLabels.map((t) => {
+              const on = !hiddenTools.includes(t.id);
+              return (
+                <label key={t.id} className={`${row} cursor-pointer`}>
+                  <span>{t.label}</span>
+                  <input type="checkbox" checked={on} onChange={() => onToggleTool(t.id)} className="accent-black w-3.5 h-3.5 self-center" />
+                </label>
+              );
+            })}
+          </div>
+
+          <div>
+            <div className="ofst-run mb-0.5">
               <span>Настройки и память</span>
             </div>
             <button onClick={act(onOpenSettings)} className={row}>
@@ -145,6 +169,5 @@ export const RightDrawer: React.FC<RightDrawerProps> = ({
           <span className="tabular-nums">{usedMb} MB</span>
         </div>
       </div>
-    </div>
   );
 };

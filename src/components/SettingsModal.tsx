@@ -52,7 +52,7 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
   return (
     <div
       id="modal-settings-backdrop"
-      className="fixed inset-0 bg-black/40 z-[70] flex items-center justify-center p-2 select-none"
+      className="fixed inset-0 bg-black/40 ofst-fade z-[70] flex items-center justify-center p-2 select-none"
       onClick={onClose}
     >
       <div className="bg-white max-w-md w-full p-2 text-[var(--fg)]" onClick={(e) => e.stopPropagation()}>

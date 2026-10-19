@@ -70,6 +70,10 @@ export interface MasterPrompt {
   name: string;
   prompt: string;
   tags?: string[];
+  /** Shelf in the prompt library (Исходник, Каталог, …); old prompts derive it from tags */
+  category?: string;
+  /** Set when the prompt belongs to one project only */
+  projectId?: string;
   createdAt: number;
 }
 

@@ -4,6 +4,7 @@ import { compressImageDataUrl, loadGlobalProducts, saveGlobalProducts } from '..
 import { ImageCropModal } from './ImageCropModal';
 import { normalizeImageFiles, isImageFile } from '../utils/heic';
 import { PRODUCT_DRAG_TYPE } from '../utils/dragTypes';
+import { EXPORT_PRESETS, ExportPhotos, ExportPreset, exportPositions } from '../utils/positionsExport';
 
 /** One square photo slot in the positions table; ★ marks the final photo of the row. */
 const Slot: React.FC<{ src: string; label: string; isFinal: boolean; onPick: () => void; onMarkFinal: () => void }> = ({
@@ -93,6 +94,7 @@ interface ProductLibraryDrawerProps {
   products: ProductItem[];
   onSaveProducts: (products: ProductItem[]) => void;
   onAddProductToCanvas?: (product: ProductItem) => void;
+  projectName?: string;
 }
 
 export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
@@ -101,10 +103,14 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
   products,
   onSaveProducts,
   onAddProductToCanvas,
+  projectName = 'Проект',
 }) => {
+  const [showExport, setShowExport] = useState(false);
+  const [exportPreset, setExportPreset] = useState<ExportPreset>('names');
+  const [exportPhotos, setExportPhotos] = useState<ExportPhotos>('final');
+  const [exportBaseUrl, setExportBaseUrl] = useState('');
   const [localProducts, setLocalProducts] = useState<ProductItem[]>(products || []);
   const [activeUploadIndex, setActiveUploadIndex] = useState<number | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
   const [cropModalState, setCropModalState] = useState<{
     isOpen: boolean;
     rawSrc: string;
@@ -132,13 +138,16 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
 
   if (!isOpen) return null;
 
+  // Columns: the chosen number, or more if some position already has more variants (e.g. dropped from the board)
+  const shownCols = Math.max(variantCols, ...localProducts.map((p) => p.variants?.length || 0));
+
   const handleAddRow = () => {
     const newItem: ProductItem = {
       id: `prod_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
       name: `Продукт ${localProducts.length + 1}`,
       photoDataUrl: '',
     };
-    setLocalProducts((prev) => [...prev, newItem]);
+    commit([...localProducts, newItem]);
   };
 
   const handleNameChange = (index: number, newName: string) => {
@@ -150,7 +159,7 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
   };
 
   const handleDeleteRow = (index: number) => {
-    setLocalProducts((prev) => prev.filter((_, i) => i !== index));
+    commit(localProducts.filter((_, i) => i !== index));
   };
 
   const handleTriggerUpload = (index: number) => {
@@ -302,27 +311,21 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
     commit(next);
   };
 
-  const handleSave = () => {
-    onSaveProducts(localProducts);
-    saveGlobalProducts(localProducts);
-    setSaveSuccess(true);
-    setTimeout(() => {
-      setSaveSuccess(false);
-    }, 2000);
-  };
+
 
   return (
-    <div id="drawer-products-backdrop" className="fixed top-10 right-0 bottom-0 z-40 flex justify-end pointer-events-none">
-      <div
+    <div
         id="drawer-products-panel"
-        style={{ width: 'min(640px, 100vw)' }}
-        className="h-full bg-white flex flex-col z-50 select-text pointer-events-auto"
+        className="ofst-panel h-full flex flex-col select-text"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-2 pt-2">
           <div className="ofst-run">
             <span>Позиции проекта</span>
             <span className="tabular-nums">{localProducts.length}</span>
+            <button onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer">
+              закрыть
+            </button>
           </div>
         </div>
 
@@ -343,8 +346,11 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
           >
             Список CSV / JSON
           </button>
+          <button onClick={() => setShowExport((v) => !v)} className={`ofst-cell ${showExport ? 'is-on' : ''}`} title="CSV для магазина и ZIP с фото, названными по позициям">
+            Экспорт
+          </button>
           <span className="flex-1" />
-          <span className="text-[var(--grey)] px-1">Варианты {variantCols}</span>
+          <span className="text-[var(--grey)] px-1">Варианты {shownCols}</span>
           <button className="ofst-cell w-7" onClick={() => changeVariantCols(variantCols + 1)} title="Добавить колонку вариантов">
             +
           </button>
@@ -353,11 +359,69 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
               −
             </button>
           )}
-          <button onClick={handleSave} className="ofst-cell ofst-cell--primary ml-1">
-            {saveSuccess ? 'Сохранено' : 'Сохранить'}
-          </button>
-          <button onClick={onClose} className="ofst-cell ofst-cell--muted -mr-2">Закрыть</button>
+          <span className="text-[11px] text-[var(--grey)] px-1" title="Каждое изменение сразу сохраняется в этом браузере">
+            сохраняется само
+          </span>
         </div>
+        {showExport && (
+          <div className="mx-2 mt-1 p-2 bg-[var(--soft)] text-[13px] space-y-2 ofst-pop">
+            <div className="ofst-run">
+              <span>Экспорт позиций</span>
+              <span>{localProducts.length}</span>
+            </div>
+            <div>
+              <div className="flex flex-wrap -ml-2">
+                {EXPORT_PRESETS.map((x) => (
+                  <button key={x.id} onClick={() => setExportPreset(x.id)} className={`ofst-cell ${exportPreset === x.id ? 'is-on' : ''}`}>
+                    {x.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[12px] text-[var(--grey)] pt-0.5">{EXPORT_PRESETS.find((x) => x.id === exportPreset)?.note}</p>
+            </div>
+            <div className="flex flex-wrap items-center -ml-2">
+              <span className="text-[12px] text-[var(--grey)] px-2">Фото</span>
+              {(
+                [
+                  ['final', 'финальные ★'],
+                  ['all', 'исходник + все варианты'],
+                  ['source', 'только исходники'],
+                ] as [ExportPhotos, string][]
+              ).map(([id, label]) => (
+                <button key={id} onClick={() => setExportPhotos(id)} className={`ofst-cell !h-7 ${exportPhotos === id ? 'is-on' : 'ofst-cell--muted'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {exportPreset !== 'names' && (
+              <label className="block">
+                <span className="text-[12px] text-[var(--grey)]">Адрес папки с фото, если уже залиты (необязательно)</span>
+                <input
+                  value={exportBaseUrl}
+                  onChange={(e) => setExportBaseUrl(e.target.value)}
+                  placeholder="https://…/photos"
+                  className="w-full h-8 px-2 !bg-white text-[13px]"
+                />
+              </label>
+            )}
+            <div className="flex justify-end">
+              <button onClick={() => setShowExport(false)} className="ofst-cell ofst-cell--muted">
+                Отмена
+              </button>
+              <button
+                disabled={localProducts.length === 0}
+                onClick={() => {
+                  const r = exportPositions(localProducts, { preset: exportPreset, photos: exportPhotos, baseUrl: exportBaseUrl, projectName });
+                  setBatchNote(r.missing.length ? `Скачан ZIP. Без фото: ${r.missing.slice(0, 6).join(', ')}${r.missing.length > 6 ? '…' : ''}` : 'Скачан ZIP с позициями и фото.');
+                  setShowExport(false);
+                }}
+                className="ofst-cell ofst-cell--primary"
+              >
+                Скачать ZIP
+              </button>
+            </div>
+          </div>
+        )}
         {batchNote && <p className="px-2 pt-1 text-[11px] text-[var(--grey)] leading-snug">{batchNote}</p>}
         <input
           ref={folderBatchRef}
@@ -382,13 +446,13 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
           {localProducts.length === 0 ? (
             <div className="px-2 pt-4">
               <p className="text-[clamp(20px,1.8vw,26px)] font-medium leading-tight">Позиций пока нет</p>
-              <p className="text-[13px] text-[var(--grey)] mt-1 max-w-[46ch]">Перетащи папку на доску и выбери «Продукты», или нажми «Папка с фото» / «Список CSV / JSON» выше.</p>
+              <p className="text-[13px] text-[var(--grey)] mt-1 max-w-[46ch]">Перетащи папку на доску и выбери «Продукты», или нажми «Папка с фото» / «Список CSV / JSON» выше. Фото с доски можно перетащить прямо на строку позиции.</p>
             </div>
           ) : (
             <table className="w-full text-[11px]" style={{ borderSpacing: '2px', borderCollapse: 'separate' }}>
               <tbody>
                 {localProducts.map((prod, idx) => {
-                  const variants = Array.from({ length: variantCols }, (_, i) => prod.variants?.[i] || null);
+                  const variants = Array.from({ length: shownCols }, (_, i) => prod.variants?.[i] || null);
                   const finalIdx = prod.finalIndex ?? -1;
                   const dragIds = selectedIds.has(prod.id) ? [...selectedIds] : [prod.id];
                   return (
@@ -399,6 +463,7 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                         e.dataTransfer.setData(PRODUCT_DRAG_TYPE, JSON.stringify(dragIds));
                         e.dataTransfer.effectAllowed = 'copy';
                       }}
+                      data-position-id={prod.id}
                       className={`align-top ${selectedIds.has(prod.id) ? 'bg-[var(--marker)]/25' : ''}`}
                       title="Перетащи на доску (выделенные — все вместе)"
                     >
@@ -418,7 +483,7 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                           }
                         />
                       </td>
-                      <td className="w-[104px]">
+                      <td className="w-[104px]" data-position-id={prod.id} data-position-slot={-1}>
                         <Slot
                           src={prod.photoDataUrl}
                           label="Оригинал"
@@ -428,7 +493,7 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                         />
                       </td>
                       {variants.map((v, vi) => (
-                        <td key={vi} className="w-[104px]">
+                        <td key={vi} className="w-[104px]" data-position-id={prod.id} data-position-slot={vi}>
                           <Slot
                             src={v || ''}
                             label={`Вариант ${vi + 1}`}
@@ -443,6 +508,8 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                           type="text"
                           value={prod.name}
                           onChange={(e) => handleNameChange(idx, e.target.value)}
+                          onBlur={() => commit(localProducts)}
+                          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
                           className="w-full text-[13px] font-medium !bg-transparent py-0.5 focus:!bg-[var(--soft)]"
                         />
                         {prod.category && <div className="text-[11px] text-[var(--grey)]">{prod.category}</div>}
@@ -484,6 +551,5 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
           />
         )}
       </div>
-    </div>
   );
 };

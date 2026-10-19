@@ -1,6 +1,19 @@
 import React from 'react';
 import { StorageInfo } from '../types';
 
+/** Names of the top-bar tools, as shown in Меню → «Кнопки сверху» */
+export const TOOL_LABELS: { id: string; label: string }[] = [
+  { id: 'photo', label: 'Фото / папка' },
+  { id: 'ai', label: 'AI' },
+  { id: 'catalog', label: 'Каталог' },
+  { id: 'style', label: 'Стиль' },
+  { id: 'products', label: 'Продукты' },
+  { id: 'prompts', label: 'Промпты' },
+  { id: 'group', label: 'Группа' },
+  { id: 'links', label: 'Связи' },
+  { id: 'mockup', label: 'Макет сайта' },
+];
+
 interface TopBarProps {
   projectName: string;
   cardCount: number;
@@ -35,6 +48,9 @@ interface TopBarProps {
   hasSiteMockup?: boolean;
   onExportImages?: () => void;
   onOpenCatalog?: () => void;
+  /** Tool ids switched off in the menu */
+  hiddenTools?: string[];
+  isMenuOpen?: boolean;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -44,6 +60,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   storageInfo,
   onToggleSidebar,
   onOpenRightDrawer,
+  hiddenTools = [],
+  isMenuOpen = false,
   onAddImage,
   onAddFolder,
   onClearAll,
@@ -109,7 +127,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           Фото / папка
         </button>
         {addMenuOpen && onAddFolder && (
-          <div className="absolute left-0 top-full z-50 flex flex-col bg-white min-w-full">
+          <div className="absolute left-0 top-full z-50 flex flex-col bg-white min-w-full ofst-pop">
             <button id="btn-add-photos-files" className="ofst-cell justify-start" onClick={() => { setAddMenuOpen(false); onAddImage(); }}>
               Фото
             </button>
@@ -173,7 +191,9 @@ export const TopBar: React.FC<TopBarProps> = ({
     ) },
   ];
 
-  const visibleToolbar = toolbarItems.filter((i) => i.id !== 'group' || (canGroup && onGroupSelected));
+  const visibleToolbar = toolbarItems.filter(
+    (i) => !hiddenTools.includes(i.id) && (i.id !== 'group' || (canGroup && onGroupSelected))
+  );
   const orderedToolbar = [...visibleToolbar].sort((a, b) => {
     const ia = toolbarOrder.indexOf(a.id);
     const ib = toolbarOrder.indexOf(b.id);
@@ -230,7 +250,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           {projectName} · {cardCount} фото
           {selectedCount > 0 && <span className="ml-1 text-[var(--fg)]">· выбрано {selectedCount}</span>}
         </span>
-        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.5 · 19.10</span>
+        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.6 · 19.10</span>
       </div>
 
       {/* Tools: text cells, reorderable by drag */}
@@ -284,7 +304,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           </button>
         </div>
         {onOpenRightDrawer && (
-          <button id="btn-open-right-actions-drawer" onClick={onOpenRightDrawer} className="ofst-cell ofst-cell--muted" title="Все инструменты и настройки" aria-label="Меню инструментов">
+          <button id="btn-open-right-actions-drawer" onClick={onOpenRightDrawer} className={`ofst-cell ${isMenuOpen ? 'is-on' : 'ofst-cell--muted'}`} title="Все инструменты и настройки" aria-label="Меню инструментов">
             Меню
           </button>
         )}

@@ -24,6 +24,8 @@ interface CanvasProps {
   onAddImages: (files: File[], atCanvasPos?: { x: number; y: number }) => void;
   onAddFolder?: (files: FolderFile[], atCanvasPos?: { x: number; y: number }) => void;
   onDropProducts?: (productIds: string[], atCanvasPos: { x: number; y: number }) => void;
+  /** Board photos dropped on a position row (slot -1 = original, 0.. = variant column, undefined = first free) */
+  onDropCardsOnPosition?: (cardIds: string[], positionId: string, slot?: number) => void;
   onDeleteSelection?: (cardIds: string[], noteIds: string[]) => void;
   onImportFolder?: (kind: 'products' | 'board' | 'ask') => void;
   onAddNote: (note: Note) => void;
@@ -65,6 +67,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onAddImages,
   onAddFolder,
   onDropProducts,
+  onDropCardsOnPosition,
   onDeleteSelection,
   onImportFolder,
   onAddNote,
@@ -693,6 +696,22 @@ export const Canvas: React.FC<CanvasProps> = ({
     [project.siteMockup, zoom, onUpdateSiteMockup]
   );
 
+  // Dragging photos onto a position row in the products panel (it lies above the board)
+  const dropTargetRef = useRef<HTMLElement | null>(null);
+  const dragStartPositionsRef = useRef<Map<string, { x: number; y: number }> | null>(null);
+  const positionTargetAt = (x: number, y: number): HTMLElement | null => {
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    return (el?.closest('[data-position-slot]') || el?.closest('[data-position-id]')) as HTMLElement | null;
+  };
+  const markDropTarget = (el: HTMLElement | null) => {
+    if (dropTargetRef.current === el) return;
+    dropTargetRef.current?.classList.remove('ofst-drop-target');
+    el?.classList.add('ofst-drop-target');
+    dropTargetRef.current = el;
+  };
+  const onDropCardsOnPositionRef = useRef(onDropCardsOnPosition);
+  onDropCardsOnPositionRef.current = onDropCardsOnPosition;
+
   // Global mouse move and up handlers
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -714,6 +733,15 @@ export const Canvas: React.FC<CanvasProps> = ({
         const worldDx = dx / curZoom;
         const worldDy = dy / curZoom;
         const activeIds = draggedCardIdsRef.current;
+        if (!dragStartPositionsRef.current) {
+          dragStartPositionsRef.current = new Map([
+            ...cardsRef.current.filter((c) => activeIds.has(c.id)).map((c) => [c.id, { x: c.x, y: c.y }] as const),
+            ...notesRef.current
+              .filter((n) => n.attachedTo && activeIds.has(n.attachedTo))
+              .map((n) => [`note:${n.id}`, { x: n.x, y: n.y }] as const),
+          ]);
+        }
+        markDropTarget(onDropCardsOnPositionRef.current ? positionTargetAt(e.clientX, e.clientY) : null);
 
         const updatedCards = cardsRef.current.map((c) => {
           if (activeIds.has(c.id)) {
@@ -830,7 +858,28 @@ export const Canvas: React.FC<CanvasProps> = ({
       }
     };
 
-    const handleMouseUp = () => {
+    const handleMouseUp = (e: MouseEvent) => {
+      // Dropped on a position: the photo goes into that row, and the card returns to where it was on the board
+      const target = isDraggingCardsRef.current && onDropCardsOnPositionRef.current ? positionTargetAt(e.clientX, e.clientY) : null;
+      markDropTarget(null);
+      if (target && onDropCardsOnPositionRef.current) {
+        const positionId = target.dataset.positionId || target.closest<HTMLElement>('[data-position-id]')?.dataset.positionId;
+        const slotAttr = target.dataset.positionSlot;
+        const ids = [...draggedCardIdsRef.current];
+        const start = dragStartPositionsRef.current;
+        if (start) {
+          const restored = cardsRef.current.map((c) => (start.has(c.id) ? { ...c, ...start.get(c.id)! } : c));
+          cardsRef.current = restored;
+          onUpdateCards(restored);
+          if (notesRef.current.some((n) => start.has(`note:${n.id}`))) {
+            const restoredNotes = notesRef.current.map((n) => (start.has(`note:${n.id}`) ? { ...n, ...start.get(`note:${n.id}`)! } : n));
+            notesRef.current = restoredNotes;
+            onUpdateNotes(restoredNotes);
+          }
+        }
+        if (positionId) onDropCardsOnPositionRef.current(ids, positionId, slotAttr !== undefined ? Number(slotAttr) : undefined);
+      }
+      dragStartPositionsRef.current = null;
       isPanningRef.current = false;
       isDraggingCardsRef.current = false;
       isDraggingNotesRef.current = false;
@@ -1573,7 +1622,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         <div
           id="canvas-context-menu"
           style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
-          className="fixed z-50 bg-white min-w-[200px] text-[13px] text-[var(--fg)]"
+          className="fixed z-50 bg-white min-w-[200px] text-[13px] text-[var(--fg)] ofst-pop"
           onClick={(e) => e.stopPropagation()}
         >
           {onImportFolder && (
@@ -1763,13 +1812,14 @@ export const Canvas: React.FC<CanvasProps> = ({
               />
             </div>
             <p className="mt-3 max-w-[52ch] text-[13px] text-[var(--grey)]">
-              Папку студия спросит: это продукты (уйдут в позиции) или фото на доску. Каждая подпапка станет своей группой.
+              Картинку из интернета можно скопировать и вставить сюда: ⌘V / Ctrl+V. Папку студия спросит: это продукты (уйдут в позиции) или фото на доску. Каждая подпапка станет своей группой.
             </p>
           </div>
         )}
 
       {/* Hints: one grey line, no box */}
       <p className="absolute bottom-2 left-2 hidden lg:flex gap-4 text-[11px] text-[var(--grey)] z-30 pointer-events-none">
+        <span>⌘V — вставить фото</span>
         <span>Двойной клик — заметка</span>
         <span>Space — панорама</span>
         <span>Ctrl + колесо — зум</span>
@@ -1797,7 +1847,7 @@ const EmptyAddButton: React.FC<{ onFiles: () => void; onFolder?: () => void }> =
     <div className="relative inline-flex flex-col items-start">
       <button className="ofst-cell ofst-cell--primary" onClick={() => setOpen((v) => !v)}>Фото / папка</button>
       {open && (
-        <div className="flex flex-col bg-white min-w-full">
+        <div className="flex flex-col bg-white min-w-full ofst-pop">
           <button className="ofst-cell justify-start" onClick={() => { setOpen(false); onFiles(); }}>Фото</button>
           <button className="ofst-cell justify-start" onClick={() => { setOpen(false); onFolder(); }}>Папка</button>
         </div>

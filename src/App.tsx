@@ -27,13 +27,15 @@ import {
   loadMasterPrompts,
   loadMasterPromptsAsync,
   saveMasterPrompts,
+  loadGlobalProductsAsync,
+  requestPersistentStorage,
 } from './utils/storage';
 import { compressAndLoadImage, compressDataUrl, createSampleCard } from './utils/imageUtils';
 import { getStoredApiKey, hasGenerationAccess, generateImageWithGemini, analyzeStyleWithGemini, getImageModel } from './utils/gemini';
 import { SOURCE_FIX_MARKER } from './utils/storage';
 import { isImageFile, normalizeImageFiles } from './utils/heic';
 import { FolderFile, groupByFolder, folderFilesFromInput } from './utils/folderImport';
-import { TopBar } from './components/TopBar';
+import { TopBar, TOOL_LABELS } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { Canvas } from './components/Canvas';
 import { ShortcutsModal } from './components/ShortcutsModal';
@@ -65,6 +67,13 @@ function getDistanceBetweenRects(
   const dy = Math.max(0, Math.max(r1.y - (r2.y + r2.height), r2.y - (r1.y + r1.height)));
   return Math.sqrt(dx * dx + dy * dy);
 }
+
+/** Main address of the studio. Every deployment also gets its own one-off address with a separate, empty browser storage. */
+const STUDIO_HOME_HOST = 'ai-product-photo-studio-seven.vercel.app';
+const isDeploymentCopy =
+  typeof window !== 'undefined' &&
+  window.location.hostname.endsWith('.vercel.app') &&
+  window.location.hostname !== STUDIO_HOME_HOST;
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -120,6 +129,42 @@ export default function App() {
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const siteMockupInputRef = useRef<HTMLInputElement>(null);
 
+  // Which side panels are open, in the order they were opened (for the dock)
+  type DockId = 'products' | 'ai' | 'menu';
+  const [dockOrder, setDockOrder] = useState<DockId[]>([]);
+  const dockRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const open: Record<DockId, boolean> = { products: isProductLibraryOpen, ai: isGenerationOpen, menu: isRightDrawerOpen };
+    setDockOrder((prev) => {
+      const kept = prev.filter((id) => open[id]);
+      const added = (Object.keys(open) as DockId[]).filter((id) => open[id] && !kept.includes(id));
+      return [...kept, ...added];
+    });
+  }, [isProductLibraryOpen, isGenerationOpen, isRightDrawerOpen]);
+  // A newly opened panel comes into view at the right edge
+  useEffect(() => {
+    const el = dockRef.current;
+    if (el) el.scrollTo({ left: el.scrollWidth, behavior: 'smooth' });
+  }, [dockOrder]);
+
+  // Top-bar buttons switched off in the menu
+  const [hiddenTools, setHiddenTools] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('aips_hidden_tools') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const toggleTool = useCallback((id: string) => {
+    setHiddenTools((prev) => {
+      const next = prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id];
+      try {
+        localStorage.setItem('aips_hidden_tools', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, []);
+
   // Initial Data Load with IndexedDB hydration & auto-migration
   useEffect(() => {
     // 1. Fast sync initial state
@@ -131,6 +176,9 @@ export default function App() {
     setProductsList(loadGlobalProducts());
     setStorageInfo(getStorageUsage());
 
+    // Ask the browser to keep the studio's data even when the disk fills up
+    requestPersistentStorage();
+
     // 2. Full IndexedDB async hydration
     let isMounted = true;
     (async () => {
@@ -138,7 +186,7 @@ export default function App() {
         const [asyncProjects, asyncPrompts, asyncProducts, asyncStorage] = await Promise.all([
           loadProjectsAsync(),
           loadMasterPromptsAsync(),
-          loadGlobalProducts(),
+          loadGlobalProductsAsync(),
           getStorageUsageAsync(),
         ]);
         if (isMounted) {
@@ -156,6 +204,7 @@ export default function App() {
           if (asyncStorage) {
             setStorageInfo(asyncStorage);
           }
+          setStorageInfo(await getStorageUsageAsync());
         }
       } catch (err) {
         console.warn('Async IndexedDB hydration error:', err);
@@ -285,20 +334,14 @@ export default function App() {
   // Update Pan and Zoom for active project
   const handleUpdatePanZoom = useCallback(
     (pan: { x: number; y: number }, zoom: number) => {
-      setProjects((prev) =>
-        prev.map((p) => {
-          if (p.id === activeProjectId) {
-            return { ...p, pan, zoom };
-          }
-          return p;
-        })
-      );
-      const updated = projects.map((p) =>
-        p.id === activeProjectId ? { ...p, pan, zoom } : p
-      );
-      saveProjects(updated);
+      // Built from the latest state, so a pan right after adding photos never saves an older list
+      setProjects((prev) => {
+        const updated = prev.map((p) => (p.id === activeProjectId ? { ...p, pan, zoom } : p));
+        saveProjects(updated);
+        return updated;
+      });
     },
-    [activeProjectId, projects]
+    [activeProjectId]
   );
 
   // Update Cards in active project
@@ -769,7 +812,7 @@ export default function App() {
                 }
               }
 
-              const maxDim = 800;
+              const maxDim = 1600;
               let outW = sw;
               let outH = sh;
               if (outW > maxDim || outH > maxDim) {
@@ -790,7 +833,7 @@ export default function App() {
                 ctx.imageSmoothingEnabled = true;
                 ctx.imageSmoothingQuality = 'high';
                 ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
                 resolve({ src: dataUrl, width: outW, height: outH });
               } else {
                 resolve({ src: item.rawSrc, width: img.naturalWidth, height: img.naturalHeight });
@@ -1802,18 +1845,75 @@ export default function App() {
         name: `Стиль из ${selectedCardIds.size || 1} референсов`,
         prompt: tagsText,
         tags: ['Стиль', 'Анализ'],
+        category: 'Мои',
+        projectId: activeProject.id,
         createdAt: Date.now(),
       };
       const updated = [newPrompt, ...masterPrompts];
       handleSaveMasterPrompts(updated);
     },
-    [selectedCardIds, masterPrompts, handleSaveMasterPrompts]
+    [selectedCardIds, masterPrompts, handleSaveMasterPrompts, activeProject.id]
   );
 
   const handleUseStyleInGeneration = useCallback((tagsText: string) => {
     setCurrentPromptPreset(tagsText);
     setIsGenerationOpen(true);
     setIsStyleAnalysisOpen(false);
+  }, []);
+
+  // Board photos dropped on a position: into the given slot, or the first free one (original first, then variants)
+  const handleDropCardsOnPosition = useCallback(
+    (cardIds: string[], positionId: string, slot?: number) => {
+      const srcs = cardIds
+        .map((id) => (activeProject.cards || []).find((c) => c.id === id)?.src)
+        .filter((src): src is string => Boolean(src));
+      if (srcs.length === 0) return;
+      const next = productsList.map((p) => {
+        if (p.id !== positionId) return p;
+        let photo = p.photoDataUrl;
+        const variants = [...(p.variants || [])];
+        const queue = [...srcs];
+        if (slot === -1) photo = queue.shift() || photo;
+        else if (slot !== undefined && slot >= 0) {
+          variants[slot] = queue.shift() || variants[slot];
+        } else if (!photo) photo = queue.shift() || photo;
+        // The rest fill free variant columns, then new ones
+        for (const src of queue) {
+          const free = variants.findIndex((v) => !v);
+          if (free >= 0) variants[free] = src;
+          else variants.push(src);
+        }
+        return { ...p, photoDataUrl: photo, variants };
+      });
+      handleSaveProducts(next);
+    },
+    [activeProject.cards, productsList, handleSaveProducts]
+  );
+
+  // Paste: a picture copied anywhere (Pinterest "Copy image", a screenshot) lands on the board with ⌘V / Ctrl+V
+  const handleAddImagesRef = useRef(handleAddImages);
+  handleAddImagesRef.current = handleAddImages;
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      const items = Array.from(e.clipboardData?.items || []);
+      const stamp = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+      const files = items
+        .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+        .map((it, i) => {
+          const f = it.getAsFile();
+          if (!f) return null;
+          const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+          return new File([f], `Вставка ${stamp}${i ? ` ${i + 1}` : ''}.${ext}`, { type: f.type });
+        })
+        .filter((f): f is File => f !== null);
+      if (files.length === 0) return;
+      e.preventDefault();
+      handleAddImagesRef.current(files);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
   }, []);
 
   const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1835,7 +1935,7 @@ export default function App() {
     >
       {/* Storage Warning Banner (>80%) */}
       {pendingFolder && (
-        <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-2" onClick={() => setPendingFolder(null)}>
+        <div className="fixed inset-0 z-[60] bg-black/40 ofst-fade flex items-center justify-center p-2" onClick={() => setPendingFolder(null)}>
           <div className="w-full max-w-sm bg-white p-2" onClick={(e) => e.stopPropagation()}>
             <div className="ofst-run">
               <span>Что в этой папке?</span>
@@ -1873,6 +1973,17 @@ export default function App() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {isDeploymentCopy && (
+        <div className="bg-[var(--marker)] text-[var(--fg)] text-[12px] px-2 py-1 z-40 flex items-center justify-between gap-2">
+          <span>
+            Это адрес одного деплоя. У каждого адреса своя память браузера, поэтому здесь пусто. Твои проекты живут на
+            основном адресе.
+          </span>
+          <a href={`https://${STUDIO_HOME_HOST}`} className="underline shrink-0">
+            Открыть основной
+          </a>
         </div>
       )}
       {folderImportStatus && (
@@ -1940,7 +2051,9 @@ export default function App() {
         onAddSiteMockup={handleAddSiteMockupClick}
         hasSiteMockup={Boolean(activeProject.siteMockup)}
         onExportImages={handleExportImages}
-        onOpenRightDrawer={() => setIsRightDrawerOpen(true)}
+        onOpenRightDrawer={() => setIsRightDrawerOpen((v) => !v)}
+        isMenuOpen={isRightDrawerOpen}
+        hiddenTools={hiddenTools}
         onOpenCatalog={() => setIsCatalogOpen(true)}
       />
 
@@ -1963,6 +2076,7 @@ export default function App() {
           onAddFolder={askAboutFolder}
           onDeleteSelection={handleDeleteSelection}
           onDropProducts={handleDropProducts}
+          onDropCardsOnPosition={isProductLibraryOpen ? handleDropCardsOnPosition : undefined}
           onImportFolder={(kind) => pickFolder(kind)}
           selectedCardIds={selectedCardIds}
           selectedNoteIds={selectedNoteIds}
@@ -2000,31 +2114,88 @@ export default function App() {
         />
       </div>
 
-      {/* Generation Floating Draggable Panel */}
-      <GenerationPanel
-        isOpen={isGenerationOpen}
-        onClose={() => setIsGenerationOpen(false)}
-        selectedCards={selectedCardsList}
-        consideredNotes={consideredNotes}
-        onDeselectCard={(id) => {
-          setSelectedCardIds((prev) => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-          });
-        }}
-        onGenerate={handleTriggerGeminiGeneration}
-        onGenerateBatch={handleTriggerBatchGeneration}
-        isGenerating={isGenerating}
-        errorMessage={generationError}
-        onClearError={() => setGenerationError(null)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        masterPrompts={masterPrompts}
-        onOpenMasterPrompts={() => setIsMasterPromptsOpen(true)}
-        currentPromptPreset={currentPromptPreset}
-        products={productsList}
-        onOpenProducts={() => setIsProductLibraryOpen(true)}
-      />
+
+      {/* Dock: side panels stand in one row on the right. The newest opens at the edge and pushes the
+          older ones left; they squeeze down to a minimum width, then the row scrolls sideways (swipe on phones). */}
+      {dockOrder.length > 0 && (
+        <div
+          id="studio-dock"
+          ref={dockRef}
+          className="fixed top-10 right-0 bottom-0 z-40 flex max-w-full md:max-w-[calc(100vw-180px)] overflow-x-auto overflow-y-hidden overscroll-x-contain snap-x snap-mandatory md:snap-none custom-scrollbar"
+        >
+          {dockOrder.map((id) => (
+            <div key={id} className={`ofst-dock-slot ofst-dock-slot--${id} h-full snap-end`}>
+              {id === 'products' && (
+                <ProductLibraryDrawer
+                  isOpen={isProductLibraryOpen}
+                  onClose={() => setIsProductLibraryOpen(false)}
+                  products={productsList}
+                  onSaveProducts={handleSaveProducts}
+                  onAddProductToCanvas={handleAddProductToCanvas}
+                  projectName={activeProject.name}
+                />
+              )}
+              {id === 'ai' && (
+                <GenerationPanel
+                  isOpen={isGenerationOpen}
+                  onClose={() => setIsGenerationOpen(false)}
+                  selectedCards={selectedCardsList}
+                  consideredNotes={consideredNotes}
+                  onDeselectCard={(id) => {
+                    setSelectedCardIds((prev) => {
+                      const next = new Set(prev);
+                      next.delete(id);
+                      return next;
+                    });
+                  }}
+                  onGenerate={handleTriggerGeminiGeneration}
+                  onGenerateBatch={handleTriggerBatchGeneration}
+                  isGenerating={isGenerating}
+                  errorMessage={generationError}
+                  onClearError={() => setGenerationError(null)}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
+                  masterPrompts={masterPrompts}
+                  projectId={activeProject.id}
+                  onOpenMasterPrompts={() => setIsMasterPromptsOpen(true)}
+                  currentPromptPreset={currentPromptPreset}
+                  products={productsList}
+                  onOpenProducts={() => setIsProductLibraryOpen(true)}
+                />
+              )}
+              {id === 'menu' && (
+                <RightDrawer
+                  isOpen={isRightDrawerOpen}
+                  onClose={() => setIsRightDrawerOpen(false)}
+                  storageInfo={storageInfo}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
+                  onAnalyzeStyle={handleAnalyzeStyle}
+                  isAnalyzingStyle={isAnalyzingStyle}
+                  onToggleProducts={() => setIsProductLibraryOpen((v) => !v)}
+                  isProductsOpen={isProductLibraryOpen}
+                  onOpenMasterPrompts={() => setIsMasterPromptsOpen(true)}
+                  isConnectionMode={isConnectionMode}
+                  onToggleConnectionMode={handleToggleConnectionMode}
+                  onAddSiteMockup={handleAddSiteMockupClick}
+                  hasSiteMockup={Boolean(activeProject.siteMockup)}
+                  onExportImages={handleExportImages}
+                  onExportProject={handleExportProject}
+                  onImportProject={handleImportProjectClick}
+                  onOpenExportModal={() => setIsExportModalOpen(true)}
+                  onOptimizeMemory={handleOptimizeMemory}
+                  onClearMemory={handleClearMemory}
+                  onClearAll={handleClearAll}
+                  isOptimizing={isOptimizing}
+                  onToggleGeneration={() => setIsGenerationOpen((v) => !v)}
+                  isGenerationOpen={isGenerationOpen}
+                  toolLabels={TOOL_LABELS}
+                  hiddenTools={hiddenTools}
+                  onToggleTool={toggleTool}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Hidden File Inputs */}
       <input
@@ -2067,6 +2238,8 @@ export default function App() {
         isOpen={isMasterPromptsOpen}
         onClose={() => setIsMasterPromptsOpen(false)}
         masterPrompts={masterPrompts}
+        projectId={activeProject.id}
+        projectName={activeProject.name}
         onSaveMasterPrompts={handleSaveMasterPrompts}
         onSelectPromptForGen={(promptText) => {
           setCurrentPromptPreset(promptText);
@@ -2084,13 +2257,6 @@ export default function App() {
         onUseInGeneration={handleUseStyleInGeneration}
       />
 
-      <ProductLibraryDrawer
-        isOpen={isProductLibraryOpen}
-        onClose={() => setIsProductLibraryOpen(false)}
-        products={productsList}
-        onSaveProducts={handleSaveProducts}
-        onAddProductToCanvas={handleAddProductToCanvas}
-      />
 
       <SettingsModal
         isOpen={isSettingsOpen}
@@ -2114,27 +2280,6 @@ export default function App() {
         onClose={() => setPreviewCard(null)}
       />
 
-      {/* Right Drawer for Secondary/Mobile Controls */}
-      <RightDrawer
-        isOpen={isRightDrawerOpen}
-        onClose={() => setIsRightDrawerOpen(false)}
-        projectName={activeProject.name}
-        storageInfo={storageInfo}
-        onOpenExportModal={() => setIsExportModalOpen(true)}
-        onOpenShortcuts={() => setIsShortcutsOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onGenerateSample={handleGenerateSample}
-        onOptimizeMemory={handleOptimizeMemory}
-        onClearMemory={handleClearMemory}
-        isOptimizing={isOptimizing}
-        onOpenMasterPrompts={() => setIsMasterPromptsOpen(true)}
-        onExportProject={handleExportProject}
-        onImportProject={handleImportProjectClick}
-        onClearAll={handleClearAll}
-        onAddSiteMockup={handleAddSiteMockupClick}
-        hasSiteMockup={Boolean(activeProject.siteMockup)}
-        onExportImages={handleExportImages}
-      />
 
       <CatalogStudio
         isOpen={isCatalogOpen}
@@ -2152,7 +2297,7 @@ export default function App() {
           isOpen={true}
           imageSrc={canvasCropQueue[canvasCropIndex].rawSrc}
           imageName={canvasCropQueue[canvasCropIndex].name}
-          initialAspectRatio="free"
+          initialAspectRatio="original"
           queueInfo={{
             current: canvasCropIndex + 1,
             total: canvasCropQueue.length,

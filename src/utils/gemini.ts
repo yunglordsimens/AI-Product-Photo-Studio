@@ -398,6 +398,12 @@ export async function generateImageWithGemini(
     promptText = `Сгенерируй изображение в стиле приложенных референсов. ${userPrompt || ''}`.trim();
   }
 
+  // Keep scenes clean: the model likes to add pens, hands and props nobody asked for
+  if (!isSourceFix) {
+    promptText +=
+      ' Кадр чистый: не добавляй предметов, рук, людей, реквизита, надписей, логотипов и водяных знаков, которых нет в задаче или на референсах.';
+  }
+
   // If notes are provided, append them as additional requirements
   if (consideredNotes && consideredNotes.length > 0) {
     const validNotes = consideredNotes.map((n) => n.trim()).filter((n) => n.length > 0);

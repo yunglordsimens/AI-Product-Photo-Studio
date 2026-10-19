@@ -144,7 +144,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>В этом браузере</span>
             <span className="tabular-nums">{(storageInfo.usedBytes / (1024 * 1024)).toFixed(1)} MB</span>
           </div>
-          <p className="mt-0.5">Не в облаке. Для копии — «Скачать».</p>
+          <p className="mt-0.5">
+            Хранится только по адресу {typeof window !== 'undefined' ? window.location.hostname : ''}, не в облаке. Для копии —
+            «Скачать».
+          </p>
           {onCloseMobile && (
             <button onClick={onCloseMobile} className="ofst-cell md:hidden mt-1 -mx-2">
               Закрыть

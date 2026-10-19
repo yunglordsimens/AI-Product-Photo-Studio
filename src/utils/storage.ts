@@ -50,9 +50,73 @@ export const SOURCE_FIX_PROMPTS: MasterPrompt[] = [
     tags: ['исходник', 'цвет'],
     createdAt: 1700000104000,
   },
+  // Pack 2 (Oct 19, 2026): material texture, removing extras, clean background, luxury finish
+  {
+    id: 'mp_fix_texture_leather',
+    name: 'Исходник: фактура — кожа',
+    prompt: `${SOURCE_FIX_MARKER} Проработай фактуру кожи как на дорогой предметной съёмке: чёткое естественное зерно и поры, ровные резкие стежки, чистый урез (кромка) без ворсинок и наплывов краски, мягкий естественный блеск без жирных бликов. Убери пыль, заломы от хранения, отпечатки и пятна, но оставь натуральные особенности кожи и задуманную патину. Цвет кожи, фурнитура, тиснение и логотип точно как на фото. Никакого «пластика» и размытия текстуры.`,
+    tags: ['исходник', 'фактура', 'кожа'],
+    createdAt: 1700000105000,
+  },
+  {
+    id: 'mp_fix_texture_glass',
+    name: 'Исходник: фактура — стекло и парфюм',
+    prompt: `${SOURCE_FIX_MARKER} Доведи стекло и жидкость: прозрачное чистое стекло без пыли и отпечатков, ровные чистые блики и рефлексы, чёткие грани, жидкость ровного цвета без пузырей. Крышка и металл без царапин. Этикетка и все надписи остаются буква в букву, резкие и ровные. Форму флакона не меняй.`,
+    tags: ['исходник', 'фактура', 'стекло'],
+    createdAt: 1700000106000,
+  },
+  {
+    id: 'mp_fix_texture_fabric',
+    name: 'Исходник: фактура — ткань и одежда',
+    prompt: `${SOURCE_FIX_MARKER} Проработай ткань: видимое плетение и фактура, убери катышки, ворсинки, пыль, случайные заломы и складки от хранения, оставь задуманные складки и драпировку. Швы ровные, цвет ткани точно как на фото, бирки и принты без изменений.`,
+    tags: ['исходник', 'фактура', 'ткань'],
+    createdAt: 1700000107000,
+  },
+  {
+    id: 'mp_fix_texture_metal',
+    name: 'Исходник: фактура — металл и украшения',
+    prompt: `${SOURCE_FIX_MARKER} Доведи металл и камни: чистая полировка без отпечатков и разводов, резкие контролируемые блики, ровные отражения, камни прозрачные и яркие. Гравировку, клейма и надписи не меняй и не искажай. Форма изделия та же.`,
+    tags: ['исходник', 'фактура', 'металл'],
+    createdAt: 1700000108000,
+  },
+  {
+    id: 'mp_fix_texture_food',
+    name: 'Исходник: фактура — еда',
+    prompt: `${SOURCE_FIX_MARKER} Сделай блюдо свежим и аппетитным: сочная естественная фактура, лёгкий свежий блеск, хрустящие края там, где они есть, чистые края тарелки без капель и крошек. Порция, ингредиенты и их расположение те же, ничего не добавляй и не убирай из блюда.`,
+    tags: ['исходник', 'фактура', 'еда'],
+    createdAt: 1700000109000,
+  },
+  {
+    id: 'mp_fix_remove_extra',
+    name: 'Исходник: убрать лишнее',
+    prompt: `${SOURCE_FIX_MARKER} Убери из кадра всё, что не относится к продукту: случайные предметы, ручки, провода, бирки, мусор, чужие руки и пальцы по краям, отражения людей и техники, лишние тени. Заполни освободившиеся места фоном так, чтобы следов не было видно. Сам продукт не трогай.`,
+    tags: ['исходник', 'чистота'],
+    createdAt: 1700000110000,
+  },
+  {
+    id: 'mp_fix_hand_clean',
+    name: 'Исходник: рука с продуктом, без лишнего',
+    prompt: `${SOURCE_FIX_MARKER} В кадре рука держит продукт: оставь руку, но сделай её аккуратной — ровный тон кожи, чистые ухоженные ногти, без украшений, царапин и следов. Убери всё остальное лишнее вокруг (предметы, ручки, провода, мусор). Положение руки и продукта то же, пальцев столько же, продукт без изменений.`,
+    tags: ['исходник', 'чистота', 'рука'],
+    createdAt: 1700000111000,
+  },
+  {
+    id: 'mp_fix_clean_bg',
+    name: 'Исходник: чистый фон',
+    prompt: `${SOURCE_FIX_MARKER} Замени только фон на чистый бесшовный светло-серый, без складок и пятен, с мягкой естественной тенью под предметом. Продукт вырежи аккуратно, края чистые, без ореола. Сам продукт, его свет и ракурс оставь как есть.`,
+    tags: ['исходник', 'фон', 'каталог'],
+    createdAt: 1700000112000,
+  },
+  {
+    id: 'mp_fix_luxury',
+    name: 'Исходник: люкс-доводка',
+    prompt: `${SOURCE_FIX_MARKER} Финальная доводка уровня люксового каталога: микроконтраст и резкость по материалу, глубокие чистые чёрные, ровные светлые без пересвета, аккуратные контролируемые блики, чистые края продукта, спокойный нейтральный цвет. Ничего не добавляй и не убирай, не меняй форму, цвет и надписи — только качество изображения.`,
+    tags: ['исходник', 'люкс'],
+    createdAt: 1700000113000,
+  },
 ];
 
-const SOURCE_FIX_ADDED_FLAG = 'aips_source_fix_prompts_v1';
+const SOURCE_FIX_ADDED_FLAG = 'aips_source_fix_prompts_v2';
 
 /** Adds the source-fix prompts once to libraries saved before they existed. */
 function withSourceFixPrompts(prompts: MasterPrompt[]): MasterPrompt[] {
@@ -195,6 +259,14 @@ export function getInitialProjects(): Project[] {
 
 // In-memory cache for ultra-fast sync rendering
 let inMemoryProjectsCache: Project[] | null = null;
+// Nothing is written to IndexedDB until the stored projects have been read once.
+// Otherwise the empty starter project shown in the first milliseconds could overwrite real work.
+let projectsHydrated = false;
+let pendingProjectsSave: Project[] | null = null;
+let productsHydrated = false;
+let pendingProductsSave: ProductItem[] | null = null;
+let promptsHydrated = false;
+let pendingPromptsSave: MasterPrompt[] | null = null;
 let inMemoryMasterPromptsCache: MasterPrompt[] | null = null;
 let inMemoryProductsCache: ProductItem[] | null = null;
 
@@ -207,6 +279,7 @@ export async function loadProjectsAsync(): Promise<Project[]> {
     const fromIdb = await idbGet<Project[]>(STORAGE_KEY_PROJECTS);
     if (fromIdb && Array.isArray(fromIdb) && fromIdb.length > 0) {
       inMemoryProjectsCache = fromIdb;
+      markProjectsHydrated(false);
       return fromIdb;
     }
 
@@ -223,6 +296,7 @@ export async function loadProjectsAsync(): Promise<Project[]> {
           try {
             localStorage.removeItem(STORAGE_KEY_PROJECTS);
           } catch {}
+          markProjectsHydrated(false);
           return parsed;
         }
       } catch (err) {
@@ -230,17 +304,27 @@ export async function loadProjectsAsync(): Promise<Project[]> {
       }
     }
 
-    // 3. Fresh instance
-    const initial = getInitialProjects();
+    // 3. Fresh instance (nothing stored yet): keep whatever was made meanwhile
+    const initial = pendingProjectsSave || getInitialProjects();
     inMemoryProjectsCache = initial;
     await idbSet(STORAGE_KEY_PROJECTS, initial);
+    markProjectsHydrated(false);
     return initial;
   } catch (err) {
+    // Reading failed: do not unlock saving, so a broken read never wipes the stored projects
     console.error('Error loading projects:', err);
     const initial = getInitialProjects();
     inMemoryProjectsCache = initial;
     return initial;
   }
+}
+
+function markProjectsHydrated(writePending: boolean): void {
+  projectsHydrated = true;
+  if (writePending && pendingProjectsSave) {
+    idbSet(STORAGE_KEY_PROJECTS, pendingProjectsSave).catch(() => {});
+  }
+  pendingProjectsSave = null;
 }
 
 /**
@@ -272,6 +356,10 @@ export function loadProjects(): Project[] {
  */
 export function saveProjects(projects: Project[]): boolean {
   inMemoryProjectsCache = projects;
+  if (!projectsHydrated) {
+    pendingProjectsSave = projects;
+    return true;
+  }
   idbSet(STORAGE_KEY_PROJECTS, projects).catch((err) => {
     console.error('Failed to save projects to IndexedDB:', err);
   });
@@ -295,36 +383,50 @@ export function setActiveProjectId(id: string): void {
 }
 
 /**
- * Accurate storage calculation utilizing browser quota (Gigabytes in IndexedDB).
+ * Size of the studio's own data (projects, products, prompts), plus the browser quota.
+ * The browser's own "usage" number counts everything on the site (caches, padding) and can show
+ * tens of gigabytes that the studio never wrote, so it is not shown.
  */
 export async function getStorageUsageAsync(): Promise<StorageInfo> {
   const usage = await getDiskStorageUsage();
+  const own = getStorageUsage();
   return {
-    usedBytes: usage.usedBytes,
+    usedBytes: own.usedBytes,
     maxBytes: usage.maxBytes,
-    percentage: usage.percentage,
+    percentage: Math.min(100, Math.round((own.usedBytes / usage.maxBytes) * 100)),
   };
 }
 
+/** Ask the browser not to clear the studio's data when the disk gets full. Safe to call often. */
+export async function requestPersistentStorage(): Promise<boolean> {
+  try {
+    if (navigator.storage?.persisted && (await navigator.storage.persisted())) return true;
+    if (navigator.storage?.persist) return await navigator.storage.persist();
+  } catch {}
+  return false;
+}
+
+/** Roughly how many bytes a value takes: string lengths are summed without building a JSON copy. */
+function approxSize(value: unknown): number {
+  if (typeof value === 'string') return value.length;
+  if (typeof value === 'number' || typeof value === 'boolean') return 8;
+  if (Array.isArray(value)) return value.reduce((n: number, v) => n + approxSize(v), 0);
+  if (value && typeof value === 'object') {
+    let n = 0;
+    for (const v of Object.values(value)) n += approxSize(v);
+    return n;
+  }
+  return 0;
+}
+
 export function getStorageUsage(): StorageInfo {
-  // Approximate synchronous calculation
-  let approxBytes = 0;
-  if (inMemoryProjectsCache) {
-    try {
-      approxBytes += JSON.stringify(inMemoryProjectsCache).length * 2;
-    } catch {}
-  }
-  if (inMemoryProductsCache) {
-    try {
-      approxBytes += JSON.stringify(inMemoryProductsCache).length * 2;
-    } catch {}
-  }
-  const maxBytes = 10 * 1024 * 1024 * 1024; // 10 GB standard IndexedDB quota
-  const percentage = Math.min(100, Math.round((approxBytes / maxBytes) * 100));
+  const approxBytes =
+    approxSize(inMemoryProjectsCache) + approxSize(inMemoryProductsCache) + approxSize(inMemoryMasterPromptsCache);
+  const maxBytes = 10 * 1024 * 1024 * 1024;
   return {
     usedBytes: approxBytes,
     maxBytes,
-    percentage,
+    percentage: Math.min(100, Math.round((approxBytes / maxBytes) * 100)),
   };
 }
 
@@ -506,6 +608,8 @@ export async function loadMasterPromptsAsync(): Promise<MasterPrompt[]> {
     if (fromIdb && Array.isArray(fromIdb) && fromIdb.length > 0) {
       const merged = withStylePack(withSourceFixPrompts(fromIdb));
       inMemoryMasterPromptsCache = merged;
+      promptsHydrated = true;
+      pendingPromptsSave = null;
       return merged;
     }
 
@@ -515,13 +619,18 @@ export async function loadMasterPromptsAsync(): Promise<MasterPrompt[]> {
       if (Array.isArray(parsed) && parsed.length > 0) {
         inMemoryMasterPromptsCache = parsed;
         await idbSet(STORAGE_KEY_MASTER_PROMPTS, parsed);
+        promptsHydrated = true;
+        pendingPromptsSave = null;
         return parsed;
       }
     }
 
-    inMemoryMasterPromptsCache = DEFAULT_MASTER_PROMPTS;
-    await idbSet(STORAGE_KEY_MASTER_PROMPTS, DEFAULT_MASTER_PROMPTS);
-    return DEFAULT_MASTER_PROMPTS;
+    const fresh = pendingPromptsSave || DEFAULT_MASTER_PROMPTS;
+    inMemoryMasterPromptsCache = fresh;
+    await idbSet(STORAGE_KEY_MASTER_PROMPTS, fresh);
+    promptsHydrated = true;
+    pendingPromptsSave = null;
+    return fresh;
   } catch {
     inMemoryMasterPromptsCache = DEFAULT_MASTER_PROMPTS;
     return DEFAULT_MASTER_PROMPTS;
@@ -546,6 +655,10 @@ export function loadMasterPrompts(): MasterPrompt[] {
 
 export function saveMasterPrompts(prompts: MasterPrompt[]): boolean {
   inMemoryMasterPromptsCache = prompts;
+  if (!promptsHydrated) {
+    pendingPromptsSave = prompts;
+    return true;
+  }
   idbSet(STORAGE_KEY_MASTER_PROMPTS, prompts).catch((err) => {
     console.error('Failed to save master prompts to IndexedDB:', err);
   });
@@ -558,6 +671,8 @@ export async function loadGlobalProductsAsync(): Promise<ProductItem[]> {
     const fromIdb = await idbGet<ProductItem[]>(STORAGE_KEY_GLOBAL_PRODUCTS);
     if (fromIdb && Array.isArray(fromIdb)) {
       inMemoryProductsCache = fromIdb;
+      productsHydrated = true;
+      pendingProductsSave = null;
       return fromIdb;
     }
 
@@ -567,14 +682,24 @@ export async function loadGlobalProductsAsync(): Promise<ProductItem[]> {
       if (Array.isArray(parsed)) {
         inMemoryProductsCache = parsed;
         await idbSet(STORAGE_KEY_GLOBAL_PRODUCTS, parsed);
+        productsHydrated = true;
+        pendingProductsSave = null;
         return parsed;
       }
     }
+    // Nothing stored yet: keep whatever was added meanwhile
+    const fresh = pendingProductsSave || [];
+    inMemoryProductsCache = fresh;
+    productsHydrated = true;
+    pendingProductsSave = null;
+    if (fresh.length) await idbSet(STORAGE_KEY_GLOBAL_PRODUCTS, fresh);
+    return fresh;
   } catch (err) {
+    // Reading failed: keep saving locked so a broken read never wipes the stored list
     console.warn('Failed to load global products:', err);
   }
-  inMemoryProductsCache = [];
-  return [];
+  inMemoryProductsCache = inMemoryProductsCache || [];
+  return inMemoryProductsCache;
 }
 
 export function loadGlobalProducts(): ProductItem[] {
@@ -595,6 +720,10 @@ export function loadGlobalProducts(): ProductItem[] {
 
 export function saveGlobalProducts(products: ProductItem[]): void {
   inMemoryProductsCache = products;
+  if (!productsHydrated) {
+    pendingProductsSave = products;
+    return;
+  }
   idbSet(STORAGE_KEY_GLOBAL_PRODUCTS, products).catch((err) => {
     console.error('Failed to save global products to IndexedDB:', err);
   });

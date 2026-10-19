@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Card, MasterPrompt, Note, ProductItem } from '../types';
+import { groupPrompts } from '../utils/promptCategories';
 
 export interface ConsideredNoteInfo {
   id: string;
@@ -34,6 +35,8 @@ interface GenerationPanelProps {
   onClearError: () => void;
   onOpenSettings: () => void;
   masterPrompts?: MasterPrompt[];
+  /** Active project: its own prompts are listed, other projects' are hidden */
+  projectId?: string;
   onOpenMasterPrompts?: () => void;
   currentPromptPreset?: string;
   products?: ProductItem[];
@@ -53,6 +56,7 @@ export function GenerationPanel({
   onClearError,
   onOpenSettings,
   masterPrompts = [],
+  projectId,
   onOpenMasterPrompts,
   currentPromptPreset,
   products = [],
@@ -342,10 +346,14 @@ export function GenerationPanel({
       </div>
       <select id={id} value={selectedMasterPromptId} onChange={handleMasterPromptSelect} className="w-full h-8 px-2 text-[13px]">
         <option value="">— без мастер-промпта —</option>
-        {masterPrompts.map((mp) => (
-          <option key={mp.id} value={mp.id}>
-            {mp.name}
-          </option>
+        {groupPrompts(masterPrompts, projectId).map((g) => (
+          <optgroup key={g.title} label={g.title}>
+            {g.items.map((mp) => (
+              <option key={mp.id} value={mp.id}>
+                {mp.name}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </select>
     </div>
@@ -382,15 +390,11 @@ export function GenerationPanel({
 
   return (
     <>
-      {/* Mobile backdrop for the bottom sheet */}
-      <div onClick={onClose} className="fixed inset-0 bg-black/30 z-40 sm:hidden" />
-
-      {/* Docked on the right under the top bar (desktop), bottom sheet on phones */}
+      {/* A column in the studio dock (right side) */}
       <div
         ref={panelRef}
         id="generation-floating-panel"
-        className="fixed z-50 bg-white text-[var(--fg)] inset-x-0 bottom-0 max-h-[75vh] w-full overflow-y-auto custom-scrollbar
-          sm:inset-x-auto sm:right-0 sm:top-10 sm:bottom-0 sm:max-h-none sm:w-[400px]"
+        className="ofst-panel h-full text-[var(--fg)] overflow-y-auto custom-scrollbar"
       >
         <div className="sticky top-0 z-10 bg-white px-2 pt-2 select-none">
           <div className="ofst-run">
