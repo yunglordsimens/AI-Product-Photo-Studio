@@ -5,6 +5,7 @@ import { NoteItem } from './NoteItem';
 import { ZoomControls } from './ZoomControls';
 import { isImageFile } from '../utils/heic';
 import { FolderFile, collectFolderFiles, folderEntriesFromDrop } from '../utils/folderImport';
+import { PRODUCT_DRAG_TYPE } from '../utils/dragTypes';
 import {
   Layers,
   Sparkles,
@@ -34,6 +35,9 @@ interface CanvasProps {
   onPreviewCard: (card: Card) => void;
   onAddImages: (files: File[], atCanvasPos?: { x: number; y: number }) => void;
   onAddFolder?: (files: FolderFile[], atCanvasPos?: { x: number; y: number }) => void;
+  onDropProducts?: (productIds: string[], atCanvasPos: { x: number; y: number }) => void;
+  onDeleteSelection?: (cardIds: string[], noteIds: string[]) => void;
+  onImportFolder?: (kind: 'products' | 'board') => void;
   onAddNote: (note: Note) => void;
   onDeleteNote: (noteId: string) => void;
   onUpdateNoteText: (noteId: string, text: string) => void;
@@ -72,6 +76,9 @@ export const Canvas: React.FC<CanvasProps> = ({
   onPreviewCard,
   onAddImages,
   onAddFolder,
+  onDropProducts,
+  onDeleteSelection,
+  onImportFolder,
   onAddNote,
   onDeleteNote,
   onUpdateNoteText,
@@ -212,6 +219,10 @@ export const Canvas: React.FC<CanvasProps> = ({
         }
       }
 
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !isInput && onDeleteSelection && (selectedCardIds.size + selectedNoteIds.size) > 1) {
+        onDeleteSelection([...selectedCardIds], [...selectedNoteIds]);
+        return;
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && !isInput) {
         if (selectedCardIds.size > 0) {
           selectedCardIds.forEach((id) => onDeleteCard(id));
@@ -255,6 +266,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     onSelectConnection,
     onSetConnectingSourceCardId,
     onToggleConnectionMode,
+    onDeleteSelection,
   ]);
 
   // Zoom Controls
@@ -1174,7 +1186,13 @@ export const Canvas: React.FC<CanvasProps> = ({
   };
 
   // External Drag & Drop
+  // Only real files or products from the library count as drops (not toolbar buttons being reordered)
+  const isAcceptedDrag = (e: React.DragEvent) => {
+    const types = Array.from(e.dataTransfer?.types || []);
+    return types.includes('Files') || types.includes(PRODUCT_DRAG_TYPE);
+  };
   const handleDragOver = (e: React.DragEvent) => {
+    if (!isAcceptedDrag(e)) return;
     e.preventDefault();
     if (!isDragOver) setIsDragOver(true);
   };
@@ -1187,6 +1205,16 @@ export const Canvas: React.FC<CanvasProps> = ({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
+    // Products dragged from the library panel
+    const productIds = e.dataTransfer.getData(PRODUCT_DRAG_TYPE);
+    if (productIds && onDropProducts) {
+      try {
+        onDropProducts(JSON.parse(productIds), screenToCanvas(e.clientX, e.clientY));
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     // A dropped folder: keep its structure (one group per subfolder), no crop queue
     const folderEntries = onAddFolder ? folderEntriesFromDrop(e.dataTransfer) : null;
     if (folderEntries && onAddFolder) {
@@ -1579,6 +1607,28 @@ export const Canvas: React.FC<CanvasProps> = ({
           className="fixed z-50 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-gray-200 py-1.5 min-w-[190px] text-xs animate-in zoom-in-95 duration-100"
           onClick={(e) => e.stopPropagation()}
         >
+          {onImportFolder && (
+            <>
+              <button
+                onClick={() => {
+                  onImportFolder('products');
+                  setContextMenu((prev) => ({ ...prev, visible: false }));
+                }}
+                className="w-full px-3 py-2 text-left text-gray-700 hover:bg-gray-100 flex items-center gap-2 font-medium cursor-pointer"
+              >
+                <span>Импорт продуктов (папка)</span>
+              </button>
+              <button
+                onClick={() => {
+                  onImportFolder('board');
+                  setContextMenu((prev) => ({ ...prev, visible: false }));
+                }}
+                className="w-full px-3 py-2 text-left text-gray-700 hover:bg-gray-100 flex items-center gap-2 font-medium cursor-pointer border-b border-gray-100"
+              >
+                <span>Папка фото на доску</span>
+              </button>
+            </>
+          )}
           {selectedCardIds.size > 1 && onGroupSelected && (
             <button
               onClick={() => {

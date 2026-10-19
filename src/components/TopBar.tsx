@@ -364,6 +364,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             onDragStart={(e) => {
               setDragId(item.id);
               e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('application/x-aips-toolbar', item.id);
             }}
             ref={(el) => {
               if (el) itemRefs.current.set(item.id, el);

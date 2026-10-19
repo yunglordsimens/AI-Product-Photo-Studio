@@ -1,4 +1,41 @@
 @import "tailwindcss";
+@import "@fontsource-variable/instrument-sans";
+
+/* OFST look: black & white, square, one typeface, yellow marker for "chosen". */
+@theme {
+  --font-sans: "Instrument Sans Variable", "Instrument Sans", system-ui, sans-serif;
+  --font-mono: "Instrument Sans Variable", "Instrument Sans", system-ui, sans-serif;
+
+  --color-blue-50: #f2f2f2; --color-blue-100: #ebebeb; --color-blue-200: #d6d6d6; --color-blue-300: #c2c2c2;
+  --color-blue-400: #6b6b6b; --color-blue-500: #111111; --color-blue-600: #000000; --color-blue-700: #000000;
+  --color-blue-800: #000000; --color-blue-900: #000000;
+  --color-indigo-50: #f2f2f2; --color-indigo-100: #ebebeb; --color-indigo-200: #d6d6d6; --color-indigo-300: #c2c2c2;
+  --color-indigo-400: #6b6b6b; --color-indigo-500: #111111; --color-indigo-600: #000000; --color-indigo-700: #000000;
+  --color-indigo-800: #000000; --color-indigo-900: #000000;
+  --color-purple-50: #f2f2f2; --color-purple-100: #ebebeb; --color-purple-200: #d6d6d6; --color-purple-300: #c2c2c2;
+  --color-purple-400: #6b6b6b; --color-purple-500: #111111; --color-purple-600: #000000; --color-purple-700: #000000;
+  --color-purple-800: #000000; --color-purple-900: #000000;
+  --color-violet-50: #f2f2f2; --color-violet-100: #ebebeb; --color-violet-200: #d6d6d6; --color-violet-600: #000000; --color-violet-700: #000000;
+  --color-teal-50: #f2f2f2; --color-teal-100: #ebebeb; --color-teal-200: #d6d6d6; --color-teal-300: #c2c2c2;
+  --color-teal-500: #111111; --color-teal-600: #000000; --color-teal-700: #000000; --color-teal-800: #000000;
+  --color-emerald-50: #f2f2f2; --color-emerald-100: #ebebeb; --color-emerald-200: #d6d6d6; --color-emerald-500: #111111;
+  --color-emerald-600: #000000; --color-emerald-700: #000000; --color-emerald-800: #000000;
+  --color-sky-50: #f2f2f2; --color-sky-100: #ebebeb; --color-sky-200: #d6d6d6; --color-sky-600: #000000;
+  --color-green-500: #000000; --color-green-600: #000000;
+  --color-gray-50: #f7f7f7; --color-gray-100: #f2f2f2; --color-gray-200: #e3e3e3; --color-gray-300: #d6d6d6;
+  --color-gray-400: #9a9a9a; --color-gray-500: #6b6b6b; --color-gray-600: #4a4a4a; --color-gray-700: #222222;
+  --color-gray-800: #111111; --color-gray-900: #000000;
+  --color-yellow-300: #ffe500;
+}
+
+/* No rounded corners anywhere, no soft glass blur */
+*, *::before, *::after {
+  border-radius: 0 !important;
+}
+.backdrop-blur-xs, .backdrop-blur-sm, .backdrop-blur-md, .backdrop-blur-lg {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
 
 @layer utilities {
   .custom-scrollbar::-webkit-scrollbar {
@@ -25,8 +62,9 @@ html, body, #root {
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
-  background-color: #f3f4f6;
-  color: #1f2937;
+  background-color: #ffffff;
+  color: #000000;
+  font-family: var(--font-sans);
   /* App-like: the page itself never pinch-zooms or bounces (panels still scroll) */
   touch-action: pan-x pan-y;
   overscroll-behavior: none;

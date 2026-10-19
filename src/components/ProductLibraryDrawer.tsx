@@ -4,6 +4,44 @@ import { ProductItem } from '../types';
 import { compressImageDataUrl, loadGlobalProducts, saveGlobalProducts } from '../utils/storage';
 import { ImageCropModal } from './ImageCropModal';
 import { normalizeImageFiles, isImageFile } from '../utils/heic';
+import { PRODUCT_DRAG_TYPE } from '../utils/dragTypes';
+
+/** One square photo slot in the positions table; ★ marks the final photo of the row. */
+const Slot: React.FC<{ src: string; label: string; isFinal: boolean; onPick: () => void; onMarkFinal: () => void }> = ({
+  src,
+  label,
+  isFinal,
+  onPick,
+  onMarkFinal,
+}) => (
+  <div className={`relative w-[104px] h-[104px] border ${isFinal && src ? 'border-2 border-gray-900' : 'border-gray-200'} bg-gray-50 group/slot`}>
+    {src ? (
+      <img src={src} alt={label} className="w-full h-full object-cover" draggable={false} />
+    ) : (
+      <button onClick={onPick} className="w-full h-full text-[10px] text-gray-400 hover:text-gray-900 cursor-pointer" title={`Загрузить: ${label}`}>
+        + {label}
+      </button>
+    )}
+    {src && (
+      <>
+        <button
+          onClick={onMarkFinal}
+          className={`absolute top-0 left-0 px-1 text-[11px] leading-4 cursor-pointer ${isFinal ? 'bg-yellow-300 text-gray-900' : 'bg-white/80 text-gray-400 opacity-0 group-hover/slot:opacity-100'}`}
+          title="Сделать финальным фото позиции"
+        >
+          ★
+        </button>
+        <button
+          onClick={onPick}
+          className="absolute bottom-0 right-0 px-1 text-[10px] bg-white/80 text-gray-600 opacity-0 group-hover/slot:opacity-100 cursor-pointer"
+          title="Заменить"
+        >
+          заменить
+        </button>
+      </>
+    )}
+  </div>
+);
 
 const normName = (s: string) =>
   s
@@ -78,6 +116,16 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
   const folderBatchRef = useRef<HTMLInputElement>(null);
   const listBatchRef = useRef<HTMLInputElement>(null);
   const [batchNote, setBatchNote] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [variantCols, setVariantCols] = useState<number>(() => {
+    try {
+      return Number(localStorage.getItem('aips_variant_cols') || '2');
+    } catch {
+      return 2;
+    }
+  });
+  const variantInputRef = useRef<HTMLInputElement>(null);
+  const variantTarget = useRef<{ row: number; col: number } | null>(null);
 
   useEffect(() => {
     setLocalProducts(products || []);
@@ -213,6 +261,48 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
     setBatchNote(`Из списка добавлено ${fresh.length} позиций. Теперь можно загрузить папку с фото — они подставятся по названию.`);
   };
 
+  const changeVariantCols = (n: number) => {
+    const v = Math.max(0, Math.min(8, n));
+    setVariantCols(v);
+    try {
+      localStorage.setItem('aips_variant_cols', String(v));
+    } catch {
+      /* private mode */
+    }
+  };
+  const setFinal = (row: number, col: number) => {
+    const next = localProducts.map((p, i) => (i === row ? { ...p, finalIndex: col } : p));
+    commit(next);
+  };
+  const triggerVariantUpload = (row: number, col: number) => {
+    variantTarget.current = { row, col };
+    variantInputRef.current?.click();
+  };
+  const handleVariantFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = e.target.files?.[0];
+    e.target.value = '';
+    const target = variantTarget.current;
+    if (!picked || !target) return;
+    const [file] = await normalizeImageFiles([picked]);
+    if (!file) return;
+    const raw = await new Promise<string>((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as string);
+      r.onerror = () => resolve('');
+      r.readAsDataURL(file);
+    });
+    if (!raw) return;
+    const photo = await compressImageDataUrl(raw, 1200, 0.85);
+    const next = localProducts.map((p, i) => {
+      if (i !== target.row) return p;
+      const variants = [...(p.variants || [])];
+      while (variants.length <= target.col) variants.push(null);
+      variants[target.col] = photo;
+      return { ...p, variants };
+    });
+    commit(next);
+  };
+
   const handleSave = () => {
     onSaveProducts(localProducts);
     saveGlobalProducts(localProducts);
@@ -223,15 +313,11 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
   };
 
   return (
-    <div
-      id="drawer-products-backdrop"
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex justify-end animate-in fade-in duration-200"
-      onClick={onClose}
-    >
+    <div id="drawer-products-backdrop" className="fixed top-14 right-0 bottom-0 z-40 flex justify-end pointer-events-none">
       <div
         id="drawer-products-panel"
-        style={{ width: '300px' }}
-        className="h-full bg-white shadow-2xl flex flex-col border-l border-gray-200 animate-in slide-in-from-right duration-250 z-50 select-text"
+        style={{ width: 'min(640px, 100vw)' }}
+        className="h-full bg-white shadow-2xl flex flex-col border-l border-gray-900 z-50 select-text pointer-events-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -293,88 +379,118 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
           <input ref={listBatchRef} type="file" accept=".csv,.json,.txt,text/csv,application/json,text/plain" className="hidden" onChange={handleBatchList} />
         </div>
 
-        {/* Products Table / List */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+        {/* Positions table: original | variants (one column each, + adds a column) | final = the one marked ★ */}
+        <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-gray-200 text-[11px]">
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={localProducts.length > 0 && selectedIds.size === localProducts.length}
+              onChange={(e) => setSelectedIds(e.target.checked ? new Set(localProducts.map((p) => p.id)) : new Set())}
+            />
+            <span>Выбрано {selectedIds.size}</span>
+          </label>
+          <div className="flex items-center gap-1.5">
+            <span className="text-gray-500">Колонок вариантов: {variantCols}</span>
+            <button
+              className="px-2 py-1 border border-gray-900 hover:bg-gray-900 hover:text-white cursor-pointer"
+              onClick={() => changeVariantCols(variantCols + 1)}
+              title="Добавить колонку вариантов"
+            >
+              +
+            </button>
+            {variantCols > 0 && (
+              <button
+                className="px-2 py-1 border border-gray-300 hover:border-gray-900 cursor-pointer"
+                onClick={() => changeVariantCols(variantCols - 1)}
+                title="Убрать последнюю пустую колонку"
+              >
+                −
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto">
           {localProducts.length === 0 ? (
             <div className="py-12 text-center text-gray-400 px-4">
-              <ImageIcon className="w-8 h-8 mx-auto mb-2 text-gray-300 stroke-1" />
               <p className="text-xs font-medium text-gray-600">Библиотека пуста</p>
-              <p className="text-[11px] text-gray-400 mt-1">
-                Нажмите «Добавить позицию», чтобы добавить фото и название продукта
-              </p>
+              <p className="text-[11px] text-gray-400 mt-1">Перетащи папку на доску → «Продукты», или «Папка с фото» / «Список CSV» выше</p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {localProducts.map((prod, idx) => (
-                <div
-                  key={prod.id || idx}
-                  className="bg-white border border-gray-200 rounded-xl p-2.5 shadow-2xs hover:border-gray-300 transition-all flex flex-col gap-2 group"
-                >
-                  <div className="flex items-center gap-2.5">
-                    {/* Photo Box (50x50) */}
-                    <div
-                      onClick={() => handleTriggerUpload(idx)}
-                      className="w-[50px] h-[50px] shrink-0 rounded-lg border border-dashed border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50 flex items-center justify-center cursor-pointer overflow-hidden relative group/img transition-all"
-                      title="Кликните для загрузки фото"
+            <table className="w-full border-collapse text-[11px]">
+              <tbody>
+                {localProducts.map((prod, idx) => {
+                  const variants = Array.from({ length: variantCols }, (_, i) => prod.variants?.[i] || null);
+                  const finalIdx = prod.finalIndex ?? -1;
+                  const dragIds = selectedIds.has(prod.id) ? [...selectedIds] : [prod.id];
+                  return (
+                    <tr
+                      key={prod.id || idx}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData(PRODUCT_DRAG_TYPE, JSON.stringify(dragIds));
+                        e.dataTransfer.effectAllowed = 'copy';
+                      }}
+                      className={`border-b border-gray-200 align-top ${selectedIds.has(prod.id) ? 'bg-yellow-50' : ''}`}
+                      title="Перетащи на доску (выделенные — все вместе)"
                     >
-                      {prod.photoDataUrl ? (
-                        <>
-                          <img
-                            src={prod.photoDataUrl}
-                            alt={prod.name}
-                            className="w-full h-full object-cover"
+                      <td className="p-1 w-6">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(prod.id)}
+                          onChange={() =>
+                            setSelectedIds((prev) => {
+                              const n = new Set(prev);
+                              if (n.has(prod.id)) n.delete(prod.id);
+                              else n.add(prod.id);
+                              return n;
+                            })
+                          }
+                        />
+                      </td>
+                      <td className="p-1 w-[112px]">
+                        <Slot
+                          src={prod.photoDataUrl}
+                          label="Оригинал"
+                          isFinal={finalIdx === -1}
+                          onPick={() => handleTriggerUpload(idx)}
+                          onMarkFinal={() => setFinal(idx, -1)}
+                        />
+                      </td>
+                      {variants.map((v, vi) => (
+                        <td key={vi} className="p-1 w-[112px]">
+                          <Slot
+                            src={v || ''}
+                            label={`Вариант ${vi + 1}`}
+                            isFinal={finalIdx === vi}
+                            onPick={() => triggerVariantUpload(idx, vi)}
+                            onMarkFinal={() => setFinal(idx, vi)}
                           />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center text-white">
-                            <Upload className="w-3.5 h-3.5" />
-                          </div>
-                        </>
-                      ) : (
-                        <div className="flex flex-col items-center justify-center text-gray-400">
-                          <Upload className="w-4 h-4" />
-                          <span className="text-[9px] font-medium mt-0.5">Фото</span>
+                        </td>
+                      ))}
+                      <td className="p-1 min-w-[140px]">
+                        <input
+                          type="text"
+                          value={prod.name}
+                          onChange={(e) => handleNameChange(idx, e.target.value)}
+                          className="w-full text-xs font-semibold text-gray-900 bg-transparent border-b border-transparent focus:border-gray-900 focus:outline-none py-0.5"
+                        />
+                        {prod.category && <div className="text-[10px] text-gray-400 mt-0.5">{prod.category}</div>}
+                        {!prod.photoDataUrl && <div className="mt-1 inline-block bg-yellow-300 px-1 text-[10px]">нет фото</div>}
+                        <div className="mt-1 flex items-center gap-2 text-[10px] text-gray-400">
+                          <button onClick={() => handleDeleteRow(idx)} className="hover:text-red-600 cursor-pointer">удалить</button>
+                          {prod.photoDataUrl && onAddProductToCanvas && (
+                            <button onClick={() => onAddProductToCanvas(prod)} className="hover:text-gray-900 cursor-pointer">на доску</button>
+                          )}
                         </div>
-                      )}
-                    </div>
-
-                    {/* Name Input */}
-                    <div className="flex-1 min-w-0">
-                      <label className="text-[10px] font-medium text-gray-400 block mb-0.5 uppercase tracking-wider">
-                        Название
-                      </label>
-                      <input
-                        type="text"
-                        value={prod.name}
-                        onChange={(e) => handleNameChange(idx, e.target.value)}
-                        placeholder="Название товара..."
-                        className="w-full text-xs font-medium text-gray-800 bg-gray-50 border border-gray-200 rounded-md px-2 py-1 focus:bg-white focus:outline-none focus:border-blue-500 transition-all"
-                      />
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex flex-col items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => handleDeleteRow(idx)}
-                        className="w-6 h-6 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md flex items-center justify-center transition-colors cursor-pointer"
-                        title="Удалить позицию"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                      {prod.photoDataUrl && onAddProductToCanvas && (
-                        <button
-                          onClick={() => onAddProductToCanvas(prod)}
-                          className="w-6 h-6 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md flex items-center justify-center transition-colors cursor-pointer"
-                          title="Поместить на канвас как карточку"
-                        >
-                          <PlusCircle className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </div>
+        <input type="file" ref={variantInputRef} accept="image/*,.heic,.heif" className="hidden" onChange={handleVariantFile} />
 
         {/* Footer: Save Button */}
         <div className="p-3 border-t border-gray-200 bg-gray-50">

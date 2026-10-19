@@ -580,18 +580,65 @@ export default function App() {
       setFolderImportStatus(null);
       setProductsList(next);
       saveGlobalProducts(next);
-      setStorageWarning(`Продукты: добавлено ${added}, фото обновлено у ${filled}. Открой «Продукты», чтобы посмотреть.`);
+      setFolderImportStatus(`Продукты: добавлено ${added}, фото обновлено у ${filled}.`);
+      setTimeout(() => setFolderImportStatus(null), 6000);
       setIsProductLibraryOpen(true);
     },
     [productsList]
   );
 
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const folderModeRef = useRef<'ask' | 'products' | 'board'>('ask');
   const handleFolderInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files: File[] = e.target.files ? Array.from(e.target.files) : [];
     e.target.value = '';
-    if (files.length > 0) askAboutFolder(folderFilesFromInput(files));
+    const mode = folderModeRef.current;
+    folderModeRef.current = 'ask';
+    if (files.length === 0) return;
+    const ff = folderFilesFromInput(files);
+    if (mode === 'products') await handleImportFolderAsProducts(ff);
+    else if (mode === 'board') await handleAddFolder(ff);
+    else askAboutFolder(ff);
   };
+  const pickFolder = (mode: 'ask' | 'products' | 'board') => {
+    folderModeRef.current = mode;
+    folderInputRef.current?.click();
+  };
+
+  // Products dragged from the library onto the board: a column of named cards
+  const handleDropProducts = useCallback(
+    async (ids: string[], pos: { x: number; y: number }) => {
+      const picked = productsList.filter((p) => ids.includes(p.id) && p.photoDataUrl);
+      if (picked.length === 0) return;
+      const CARD_W = 220;
+      let y = pos.y;
+      let z = (activeProject.cards || []).reduce((m, c) => Math.max(m, c.zIndex || 1), 1);
+      const cards: Card[] = [];
+      for (const prod of picked) {
+        const dims = await new Promise<{ w: number; h: number }>((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve({ w: img.naturalWidth || 1, h: img.naturalHeight || 1 });
+          img.onerror = () => resolve({ w: 1, h: 1 });
+          img.src = prod.photoDataUrl;
+        });
+        const h = Math.round(CARD_W * (dims.h / dims.w));
+        cards.push({
+          id: `card_prod_${prod.id}_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+          x: Math.round(pos.x),
+          y: Math.round(y),
+          width: CARD_W,
+          height: h,
+          src: prod.photoDataUrl,
+          name: prod.name,
+          aspectRatio: CARD_W / h,
+          zIndex: ++z,
+        });
+        y += h + 60;
+      }
+      handleUpdateCards([...(activeProject.cards || []), ...cards]);
+    },
+    [productsList, activeProject, handleUpdateCards]
+  );
 
   // Save current cropped canvas image and proceed to next in queue
   const handleSaveCanvasCrop = useCallback(
@@ -986,6 +1033,33 @@ export default function App() {
   );
 
   // Delete single card
+  // Delete everything selected in one update (deleting one by one kept only the last change)
+  const handleDeleteSelection = useCallback(
+    (cardIds: string[], noteIds: string[]) => {
+      const cardSet = new Set(cardIds);
+      const noteSet = new Set(noteIds);
+      const updated = projects.map((p) => {
+        if (p.id !== activeProjectId) return p;
+        return {
+          ...p,
+          cards: (p.cards || []).filter((c) => !cardSet.has(c.id)),
+          notes: (p.notes || [])
+            .filter((n) => !noteSet.has(n.id))
+            .map((n) => (n.attachedTo && cardSet.has(n.attachedTo) ? { ...n, attachedTo: null } : n)),
+          connections: (p.connections || []).filter((c) => !cardSet.has(c.from) && !cardSet.has(c.to)),
+          groups: (p.groups || [])
+            .map((g) => ({ ...g, children: g.children.filter((id) => !cardSet.has(id)) }))
+            .filter((g) => g.children.length > 0),
+          updatedAt: Date.now(),
+        };
+      });
+      saveProjectsToStorage(updated);
+      setSelectedCardIds(new Set());
+      setSelectedNoteIds(new Set());
+    },
+    [projects, activeProjectId, saveProjectsToStorage]
+  );
+
   const handleDeleteCard = useCallback(
     (cardId: string) => {
       const filtered = (activeProject.cards || []).filter((c) => c.id !== cardId);
@@ -1798,7 +1872,7 @@ export default function App() {
         </div>
       )}
       {folderImportStatus && (
-        <div className="bg-blue-600 text-white text-xs px-4 py-2 shadow-md z-40">{folderImportStatus}</div>
+        <div className="bg-black text-white text-xs px-4 py-2 z-40">{folderImportStatus}</div>
       )}
       {storageWarning && (
         <div
@@ -1837,7 +1911,7 @@ export default function App() {
         storageInfo={storageInfo}
         onToggleSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
         onAddImage={handleAddImageClick}
-        onAddFolder={() => folderInputRef.current?.click()}
+        onAddFolder={() => pickFolder('ask')}
         onClearAll={handleClearAll}
         onExportProject={handleExportProject}
         onImportProject={handleImportProjectClick}
@@ -1883,6 +1957,9 @@ export default function App() {
         <Canvas
           project={activeProject}
           onAddFolder={askAboutFolder}
+          onDeleteSelection={handleDeleteSelection}
+          onDropProducts={handleDropProducts}
+          onImportFolder={(kind) => pickFolder(kind)}
           selectedCardIds={selectedCardIds}
           selectedNoteIds={selectedNoteIds}
           pan={activeProject.pan || { x: 80, y: 80 }}

@@ -61,6 +61,8 @@ export interface ProductItem {
   name: string;
   photoDataUrl: string;
   category?: string; // e.g. the subfolder it came from ("Káva", "Poke Bowls")
+  variants?: (string | null)[]; // new photos for this position, one per column (data URLs)
+  finalIndex?: number; // which photo is the final one: -1 = original, 0.. = variant column
 }
 
 export interface MasterPrompt {

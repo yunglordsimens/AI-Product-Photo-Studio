@@ -183,8 +183,8 @@ export function getInitialProjects(): Project[] {
   return [
     {
       id: 'proj_' + Date.now(),
-      name: 'Проект 1 — Студия 2026',
-      cards: [sampleCard1, sampleCard2, sampleCard3],
+      name: 'Проект 1',
+      cards: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
       pan: { x: 80, y: 80 },
