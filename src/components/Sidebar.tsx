@@ -1,12 +1,4 @@
 import React, { useState } from 'react';
-import {
-  FolderPlus,
-  Folder,
-  Trash2,
-  Edit2,
-  Check,
-  X,
-} from 'lucide-react';
 import { Project, StorageInfo } from '../types';
 
 interface SidebarProps {
@@ -61,165 +53,103 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <>
-      {/* Mobile Backdrop */}
-      {isMobileOpen && (
-        <div
-          onClick={onCloseMobile}
-          className="fixed inset-0 bg-black/40 backdrop-blur-xs z-40 md:hidden animate-in fade-in duration-150"
-        />
-      )}
+      {isMobileOpen && <div onClick={onCloseMobile} className="fixed inset-0 bg-black/30 z-40 md:hidden" />}
 
       <aside
         id="sidebar-projects"
-        className={`bg-white border-r border-gray-200 flex flex-col shrink-0 select-none z-50 md:z-20 transition-transform duration-200 ease-in-out
-          ${
-            isMobileOpen
-              ? 'fixed inset-y-0 left-0 w-[260px] translate-x-0 shadow-2xl md:relative md:w-[220px] md:shadow-none'
-              : 'fixed inset-y-0 left-0 w-[260px] -translate-x-full md:relative md:w-[220px] md:translate-x-0'
-          }`}
+        className={`bg-white flex flex-col shrink-0 select-none z-50 md:z-20 transition-transform duration-200 ease-in-out fixed inset-y-0 left-0 w-[240px] md:relative md:w-[180px] md:translate-x-0 ${
+          isMobileOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
       >
-        {/* Sidebar Header */}
-        <div className="p-3 sm:p-4 border-b border-gray-100 flex items-center justify-between gap-2">
-          <button
-            id="btn-sidebar-new-project"
-            onClick={onCreateProject}
-            className="flex-1 py-2 bg-gray-900 text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-gray-800 flex items-center justify-center gap-2 shadow-xs transition-colors"
-            title="Создать новый проект"
-          >
-            <FolderPlus className="w-4 h-4" />
-            <span>+ Новый проект</span>
-          </button>
-
-          {onCloseMobile && (
-            <button
-              onClick={onCloseMobile}
-              className="md:hidden p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
-              title="Закрыть"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+        <div className="px-2 pt-2">
+          <div className="ofst-run">
+            <span>Проекты</span>
+            <span>{projects.length}</span>
+          </div>
         </div>
 
-        {/* Projects List */}
-        <div className="flex-1 overflow-y-auto py-2 sm:py-3 px-2 space-y-1 custom-scrollbar">
-          <p className="px-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
-            Проекты
-          </p>
+        <ul className="flex-1 overflow-y-auto px-2 pt-1 custom-scrollbar">
           {projects.map((proj) => {
             const isActive = proj.id === activeProjectId;
-            const isEditing = editingId === proj.id;
-
-            if (isEditing) {
+            if (editingId === proj.id) {
               return (
-                <div
-                  key={proj.id}
-                  className="p-1.5 bg-gray-50 rounded-md border border-blue-400 flex items-center gap-1 shadow-xs"
-                >
+                <li key={proj.id} className="py-0.5">
                   <input
                     type="text"
                     value={tempName}
                     onChange={(e) => setTempName(e.target.value)}
+                    onBlur={() => saveRename(proj.id)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') saveRename(proj.id);
                       if (e.key === 'Escape') cancelRename();
                     }}
                     autoFocus
-                    className="flex-1 bg-white text-xs text-gray-900 px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-blue-500"
+                    className="w-full h-7 px-1.5 text-[13px] focus:outline-none"
                   />
-                  <button
-                    onClick={() => saveRename(proj.id)}
-                    className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={cancelRename}
-                    className="p-1 text-gray-400 hover:bg-gray-200 rounded"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                </li>
               );
             }
-
             return (
-              <div
+              <li
                 key={proj.id}
                 id={`project-item-${proj.id}`}
                 onClick={() => handleSelect(proj.id)}
-                className={`group flex items-center justify-between px-3 py-2 rounded-lg text-xs cursor-pointer transition-all ${
-                  isActive
-                    ? 'bg-blue-50 text-blue-700 font-medium shadow-xs'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                onDoubleClick={(e) => startRename(proj, e)}
+                className={`group flex items-center gap-2 h-7 px-1.5 -mx-1.5 text-[13px] cursor-pointer ${
+                  isActive ? 'bg-[var(--fg)] text-white' : 'hover:bg-[var(--soft)]'
                 }`}
+                title="Двойной клик — переименовать"
               >
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <Folder
-                    className={`w-4 h-4 shrink-0 ${
-                      isActive ? 'text-blue-600' : 'text-gray-400'
-                    }`}
-                  />
-                  <span
-                    className="truncate"
-                    title={proj.name}
-                    onDoubleClick={(e) => startRename(proj, e)}
-                  >
-                    {proj.name}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1 shrink-0 ml-1">
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                      isActive
-                        ? 'bg-blue-100 text-blue-700 font-medium'
-                        : 'bg-gray-100 text-gray-500 group-hover:text-gray-700'
-                    }`}
-                  >
-                    {proj.cards?.length || 0}
-                  </span>
-
-                  <button
-                    onClick={(e) => startRename(proj, e)}
-                    className="opacity-0 group-hover:opacity-100 md:opacity-0 max-md:opacity-100 p-0.5 text-gray-400 hover:text-gray-700 rounded transition-opacity"
-                    title="Переименовать"
-                  >
-                    <Edit2 className="w-3 h-3" />
-                  </button>
-
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteProject(proj.id);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 md:opacity-0 max-md:opacity-100 p-0.5 text-gray-400 hover:text-red-500 rounded transition-opacity"
-                    title="Удалить проект"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
+                <span className="truncate flex-1">{proj.name}</span>
+                <button
+                  onClick={(e) => startRename(proj, e)}
+                  className="hidden group-hover:block max-md:block text-[11px] opacity-60 hover:opacity-100"
+                  title="Переименовать"
+                >
+                  имя
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteProject(proj.id);
+                  }}
+                  className="hidden group-hover:block max-md:block text-[11px] opacity-60 hover:opacity-100"
+                  title="Удалить проект"
+                >
+                  удалить
+                </button>
+                <span className={`text-[11px] tabular-nums ${isActive ? 'text-white/70' : 'text-[var(--grey)]'}`}>
+                  {proj.cards?.length || 0}
+                </span>
+              </li>
             );
           })}
-        </div>
+          <li>
+            <button
+              id="btn-sidebar-new-project"
+              onClick={onCreateProject}
+              className="ofst-cell justify-start w-[calc(100%+12px)] -mx-1.5 px-1.5 text-[var(--grey)] hover:text-[var(--fg)]"
+              title="Создать новый проект"
+            >
+              + Новый проект
+            </button>
+          </li>
+        </ul>
 
-        {/* Storage Footer */}
-        <div className="p-3 sm:p-4 border-t border-gray-100 bg-white">
-          <div
-            className="p-2.5 bg-gray-50 border border-gray-100 rounded-lg space-y-1"
-            title="Все проекты, фото и мастер-промпты лежат в памяти этого браузера (IndexedDB)"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-gray-700">Сохранено в этом браузере</span>
-              <span className="font-mono text-[10px] text-gray-500">
-                {(storageInfo.usedBytes / (1024 * 1024)).toFixed(1)} MB
-              </span>
-            </div>
-            <p className="text-[9px] text-gray-400 leading-tight">
-              Не в облаке: на другом устройстве этих проектов нет, а очистка браузера их сотрёт. Для копии — «Скачать проект».
-            </p>
+        <div
+          className="px-2 pb-2 text-[11px] leading-snug text-[var(--grey)]"
+          title="Все проекты, фото и мастер-промпты лежат в памяти этого браузера (IndexedDB)"
+        >
+          <div className="flex justify-between text-[var(--fg)]">
+            <span>В этом браузере</span>
+            <span className="tabular-nums">{(storageInfo.usedBytes / (1024 * 1024)).toFixed(1)} MB</span>
           </div>
+          <p className="mt-0.5">Не в облаке. Для копии — «Скачать».</p>
+          {onCloseMobile && (
+            <button onClick={onCloseMobile} className="ofst-cell md:hidden mt-1 -mx-2">
+              Закрыть
+            </button>
+          )}
         </div>
       </aside>
     </>

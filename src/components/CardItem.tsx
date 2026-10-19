@@ -1,5 +1,4 @@
 import React, { memo, useState } from 'react';
-import { X, Copy, Maximize2, Move, Link2, Info } from 'lucide-react';
 import { Card } from '../types';
 
 interface CardItemProps {
@@ -15,6 +14,14 @@ interface CardItemProps {
   onPreview: (card: Card) => void;
 }
 
+const stop = {
+  onMouseDown: (e: React.SyntheticEvent) => e.stopPropagation(),
+  onPointerDown: (e: React.SyntheticEvent) => e.stopPropagation(),
+  onTouchStart: (e: React.SyntheticEvent) => e.stopPropagation(),
+};
+
+/* A card on the board reads like an object in a printed catalogue: the photo, a caption under it, nothing else.
+   Selected = black outline, start of a link = yellow outline. Actions appear as text above the photo. */
 export const CardItem: React.FC<CardItemProps> = memo(
   ({
     card,
@@ -33,6 +40,13 @@ export const CardItem: React.FC<CardItemProps> = memo(
     const kindLabel = meta
       ? { generate: 'Генерация', product: 'Продукт в сцене', fix: 'Исправление исходника', batch: 'Пакет' }[meta.kind]
       : '';
+    const outline = isConnectingSource
+      ? 'outline-2 outline-[var(--marker)]'
+      : isSelected
+      ? 'outline-1 outline-[var(--fg)]'
+      : isConnectionMode
+      ? 'hover:outline-1 hover:outline-[var(--fg)]'
+      : '';
     return (
       <div
         id={`card-node-${card.id}`}
@@ -45,141 +59,87 @@ export const CardItem: React.FC<CardItemProps> = memo(
           zIndex: isConnectingSource ? 40 : isSelected ? 30 : card.zIndex || 10,
           touchAction: 'none',
         }}
-        className={`group absolute top-0 left-0 bg-white rounded-lg p-1 transition-[box-shadow,border-color] duration-150 select-none pointer-events-auto ${
+        className={`group absolute top-0 left-0 select-none pointer-events-auto ${
           isConnectionMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'
-        } ${
-          isConnectingSource
-            ? 'border-2 border-indigo-600 shadow-2xl ring-4 ring-indigo-500/30'
-            : isSelected
-            ? 'border-2 border-blue-500 shadow-xl ring-4 ring-blue-500/20'
-            : isConnectionMode
-            ? 'border border-blue-300 shadow-md hover:border-blue-500 hover:ring-2 hover:ring-blue-400/20'
-            : 'border border-gray-200 shadow-md hover:border-gray-300'
         }`}
       >
-        {/* Connection Source Indicator Badge */}
         {isConnectingSource && (
-          <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full shadow-md flex items-center gap-1 z-30 animate-bounce">
-            <Link2 className="w-3 h-3" />
-            <span>Начало связи (нажмите цель)</span>
+          <div className="absolute bottom-full left-0 mb-1 bg-[var(--marker)] px-1 text-[11px] whitespace-nowrap z-30">
+            Начало связи — нажми цель
           </div>
         )}
 
-        {/* Card Header Overlay Actions: Visible on Hover or when Card is Selected (crucial for Mobile Touch) */}
+        {/* Actions: text above the photo, on hover or when selected (touch) */}
         {!isConnectionMode && (
           <div
-            className={`absolute -top-3.5 -right-3.5 flex items-center gap-1 z-20 transition-opacity ${
-              isSelected
-                ? 'opacity-100 pointer-events-auto'
-                : 'opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto'
+            className={`absolute bottom-full right-0 flex bg-white text-[11px] z-20 ${
+              isSelected ? 'flex' : 'hidden group-hover:flex'
             }`}
+            {...stop}
           >
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onPreview(card);
-              }}
-              className="w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-white text-gray-700 border border-gray-200 flex items-center justify-center text-xs shadow-md hover:bg-gray-50 active:scale-90 transition-all"
-              title="Просмотр"
-              aria-label="Просмотр"
-            >
-              <Maximize2 className="w-3.5 h-3.5 sm:w-3 sm:h-3" />
+            <button onClick={(e) => { e.stopPropagation(); onPreview(card); }} className="px-1.5 h-5 hover:bg-[var(--soft)]" title="Просмотр">
+              смотреть
             </button>
-
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDuplicate(card);
-              }}
-              className="w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-white text-gray-700 border border-gray-200 flex items-center justify-center text-xs shadow-md hover:bg-gray-50 active:scale-90 transition-all"
-              title="Дублировать"
-              aria-label="Дублировать"
-            >
-              <Copy className="w-3.5 h-3.5 sm:w-3 sm:h-3" />
+            <button onClick={(e) => { e.stopPropagation(); onDuplicate(card); }} className="px-1.5 h-5 hover:bg-[var(--soft)]" title="Дублировать">
+              копия
             </button>
-
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(card.id);
-              }}
-              className="w-7 h-7 sm:w-6 sm:h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold shadow-md hover:bg-red-600 active:scale-90 transition-all"
-              title="Удалить карточку"
-              aria-label="Удалить"
-            >
-              <X className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+            <button onClick={(e) => { e.stopPropagation(); onDelete(card.id); }} className="px-1.5 h-5 hover:bg-[var(--marker)]" title="Удалить карточку">
+              удалить
             </button>
           </div>
         )}
 
-        {/* Image Display */}
-        <div className="w-full bg-gray-100 rounded-sm flex items-center justify-center overflow-hidden">
+        <div className={`bg-[var(--soft-2)] ${outline}`}>
           <img
             src={card.src}
             alt={card.name || 'Product reference'}
-            className="w-full h-auto max-w-[300px] object-cover pointer-events-none block"
+            className="w-full h-auto object-cover pointer-events-none block"
             loading="lazy"
             draggable={false}
           />
         </div>
 
-        {/* How it was made: tiny "i", details on click */}
+        {/* How it was made: details on click of "как сделано" */}
         {meta && showInfo && (
           <div
-            className="absolute left-1 right-1 bottom-9 z-20 p-2 rounded-md bg-white/95 border border-gray-200 shadow-lg text-[10px] leading-snug text-gray-700 space-y-1 max-h-48 overflow-y-auto cursor-text select-text"
-            onMouseDown={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
+            className="absolute left-0 right-0 top-full mt-1 z-20 p-1.5 bg-white text-[11px] leading-snug space-y-1 max-h-48 overflow-y-auto cursor-text select-text"
+            {...stop}
           >
-            <div className="font-semibold text-gray-900">{kindLabel}</div>
-            {meta.masterPromptName ? (
-              <div>
-                <span className="text-gray-400">Мастер-промпт:</span> {meta.masterPromptName}
-              </div>
-            ) : (
-              <div className="text-gray-400">Свой промпт</div>
-            )}
+            <div className="font-medium">{kindLabel}</div>
+            <div>
+              <span className="text-[var(--grey)]">Мастер-промпт:</span> {meta.masterPromptName || 'свой промпт'}
+            </div>
             {meta.productName && (
               <div>
-                <span className="text-gray-400">Продукт:</span> {meta.productName}
+                <span className="text-[var(--grey)]">Продукт:</span> {meta.productName}
               </div>
             )}
             {meta.prompt && <div className="whitespace-pre-wrap break-words">{meta.prompt}</div>}
-            <div className="text-gray-400 font-mono">
-              {meta.model} · источников: {meta.sourceIds?.length || 0}
+            <div className="text-[var(--grey)]">
+              {meta.model}, источников: {meta.sourceIds?.length || 0}
             </div>
           </div>
         )}
 
-        {/* Card Footer Bar with Name and Dimensions */}
-        <div className="p-1.5 flex justify-between items-center bg-white">
-          <span className="flex items-center gap-1 min-w-0">
-            {meta && (
-              <button
-                type="button"
-                onMouseDown={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-                onTouchStart={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowInfo((v) => !v);
-                }}
-                className={`shrink-0 rounded-full transition-colors cursor-pointer ${
-                  showInfo ? 'text-gray-900' : 'text-gray-300 hover:text-gray-700'
-                }`}
-                title={meta.masterPromptName ? `Мастер-промпт: ${meta.masterPromptName}` : 'Как сделано'}
-                aria-label="Как сделано"
-              >
-                <Info className="w-3 h-3" />
-              </button>
-            )}
-            <span className="text-[10px] text-gray-600 font-medium truncate max-w-[120px]" title={card.name}>
-              {card.name || 'product.png'}
-            </span>
+        {/* Caption under the photo */}
+        <div className="flex items-baseline gap-2 pt-0.5 text-[11px] leading-tight">
+          <span className="truncate text-[var(--grey)] group-hover:text-[var(--fg)]" title={card.name}>
+            {card.name || 'product.png'}
           </span>
-          <span className="text-[9px] font-mono px-1.5 py-0.5 bg-gray-100 rounded text-gray-500 shrink-0">
-            {card.width}×{card.height || '300'}
-          </span>
+          {meta && (
+            <button
+              type="button"
+              {...stop}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowInfo((v) => !v);
+              }}
+              className={`shrink-0 ml-auto cursor-pointer ${showInfo ? 'text-[var(--fg)] underline' : 'text-[var(--grey)] hover:text-[var(--fg)]'}`}
+              title={meta.masterPromptName ? `Мастер-промпт: ${meta.masterPromptName}` : 'Как сделано'}
+            >
+              как сделано
+            </button>
+          )}
         </div>
       </div>
     );

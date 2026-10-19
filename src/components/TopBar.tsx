@@ -1,26 +1,4 @@
 import React from 'react';
-import {
-  Camera,
-  Trash2,
-  Download,
-  Upload,
-  Plus,
-  FolderPlus,
-  FileCode,
-  Sparkles,
-  Settings,
-  Menu,
-  Zap,
-  RotateCcw,
-  BookOpen,
-  Link2,
-  Palette,
-  Package,
-  Layers,
-  Monitor,
-  ImageDown,
-  SlidersHorizontal,
-} from 'lucide-react';
 import { StorageInfo } from '../types';
 
 interface TopBarProps {
@@ -94,7 +72,6 @@ export const TopBar: React.FC<TopBarProps> = ({
   onExportImages,
   onOpenCatalog,
 }) => {
-  const isStorageHigh = storageInfo.percentage >= 80;
 
   // Toolbar buttons can be reordered by drag; the order is remembered in this browser
   const [dragId, setDragId] = React.useState<string | null>(null);
@@ -105,168 +82,94 @@ export const TopBar: React.FC<TopBarProps> = ({
       return [];
     }
   });
+  // One entry for photos and folders: the browser can't offer both in one picker, so the cell opens a two-line choice.
+  // Dropping files or folders on the board needs no choice at all.
+  const [addMenuOpen, setAddMenuOpen] = React.useState(false);
+  const addMenuRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!addMenuOpen) return;
+    const close = (e: PointerEvent) => {
+      if (!addMenuRef.current?.contains(e.target as Node)) setAddMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [addMenuOpen]);
+
+  const cell = (on = false) => `ofst-cell ${on ? 'is-on' : ''}`;
+
   const toolbarItems: { id: string; desktopOnly: boolean; node: React.ReactNode }[] = [
     { id: 'photo', desktopOnly: false, node: (
-      <>
-        {/* Add Photo Button (Always visible & primary) */}
+      <div ref={addMenuRef} className="relative">
         <button
           id="btn-add-photos"
-          onClick={onAddImage}
-          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:scale-95 rounded-lg shadow-xs transition-all shrink-0 cursor-pointer"
-          title="Загрузить фото (одно или несколько)"
+          onClick={() => (onAddFolder ? setAddMenuOpen((v) => !v) : onAddImage())}
+          className="ofst-cell ofst-cell--primary"
+          title="Добавить фото или папку (можно и просто перетащить на доску)"
         >
-          <Plus className="w-4 h-4" />
-          <span>Фото</span>
+          Фото / папка
         </button>
-
-        {onAddFolder && (
-          <button
-            id="btn-add-folder"
-            onClick={onAddFolder}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-all shrink-0 cursor-pointer"
-            title="Загрузить папку: каждая подпапка станет группой на доске (папку можно и просто перетащить)"
-          >
-            <FolderPlus className="w-4 h-4" />
-            <span className="hidden sm:inline">Папка</span>
-          </button>
+        {addMenuOpen && onAddFolder && (
+          <div className="absolute left-0 top-full z-50 flex flex-col bg-white min-w-full">
+            <button id="btn-add-photos-files" className="ofst-cell justify-start" onClick={() => { setAddMenuOpen(false); onAddImage(); }}>
+              Фото
+            </button>
+            <button id="btn-add-folder" className="ofst-cell justify-start" onClick={() => { setAddMenuOpen(false); onAddFolder(); }}>
+              Папка
+            </button>
+          </div>
         )}
-      </>
+      </div>
     ) },
     { id: 'ai', desktopOnly: false, node: (
-      <>
-        {/* AI Generation Quick Trigger */}
-        <button
-          id="btn-open-generation-panel"
-          onClick={onToggleGeneration}
-          className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg transition-colors shrink-0 cursor-pointer ${
-            isGenerationOpen
-              ? 'bg-purple-600 text-white shadow-xs'
-              : 'text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200'
-          }`}
-          title="AI Генерация карточек (G)"
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">AI (G)</span>
-          <span className="sm:hidden">AI</span>
-        </button>
-      </>
+      <button id="btn-open-generation-panel" onClick={onToggleGeneration} className={cell(isGenerationOpen)} title="AI генерация (G)">
+        AI
+      </button>
     ) },
-    { id: 'catalog', desktopOnly: false, node: (
-      <>
-        {/* Catalog mode */}
-        {onOpenCatalog && (
-          <button
-            id="btn-open-catalog"
-            onClick={onOpenCatalog}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-gray-900 hover:bg-gray-700 border border-gray-900 rounded-lg transition-colors shrink-0 cursor-pointer"
-            title="Каталог: один стиль на все фото"
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Каталог</span>
-          </button>
-        )}
-      </>
+    { id: 'catalog', desktopOnly: false, node: onOpenCatalog && (
+      <button id="btn-open-catalog" onClick={onOpenCatalog} className={cell()} title="Каталог: один стиль на все фото">
+        Каталог
+      </button>
     ) },
     { id: 'style', desktopOnly: true, node: (
-      <>
-          {/* Style Analysis */}
-          <button
-            id="btn-analyze-style"
-            onClick={onAnalyzeStyle}
-            disabled={isAnalyzingStyle}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors shrink-0 cursor-pointer disabled:opacity-50"
-            title="Описать стиль выделенных фото: Gemini вернёт теги (свет, фон, цвет, ракурс), их можно сохранить как мастер-промпт"
-          >
-            <Palette className={`w-3.5 h-3.5 text-indigo-600 ${isAnalyzingStyle ? 'animate-spin' : ''}`} />
-            <span className="hidden xl:inline">Стиль</span>
-          </button>
-      </>
+      <button
+        id="btn-analyze-style"
+        onClick={onAnalyzeStyle}
+        disabled={isAnalyzingStyle}
+        className={cell()}
+        title="Описать стиль выделенных фото: Gemini вернёт теги (свет, фон, цвет, ракурс), их можно сохранить как мастер-промпт"
+      >
+        {isAnalyzingStyle ? 'Стиль…' : 'Стиль'}
+      </button>
     ) },
     { id: 'products', desktopOnly: true, node: (
-      <>
-          {/* Product Library */}
-          <button
-            id="btn-toggle-products-library"
-            onClick={onToggleProducts}
-            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors shrink-0 cursor-pointer ${
-              isProductsOpen
-                ? 'bg-blue-600 text-white border-blue-700 shadow-2xs'
-                : 'text-gray-700 hover:text-blue-700 bg-gray-50 hover:bg-blue-50 border-gray-200 hover:border-blue-200'
-            }`}
-            title="Библиотека продуктов"
-          >
-            <Package className="w-3.5 h-3.5 text-blue-500" />
-            <span className="hidden xl:inline">Продукты</span>
-          </button>
-      </>
+      <button id="btn-toggle-products-library" onClick={onToggleProducts} className={cell(isProductsOpen)} title="Позиции проекта">
+        Продукты
+      </button>
     ) },
     { id: 'prompts', desktopOnly: true, node: (
-      <>
-          {/* Master Prompts */}
-          <button
-            id="btn-topbar-master-prompts"
-            onClick={onOpenMasterPrompts}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg transition-colors shrink-0 cursor-pointer"
-            title="Мастер-промпты"
-          >
-            <BookOpen className="w-3.5 h-3.5 text-purple-600" />
-            <span className="hidden xl:inline">Промпты</span>
-          </button>
-      </>
+      <button id="btn-topbar-master-prompts" onClick={onOpenMasterPrompts} className={cell()} title="Мастер-промпты">
+        Промпты
+      </button>
     ) },
-    { id: 'group', desktopOnly: true, node: (
-      <>
-          {/* Group */}
-          {canGroup && onGroupSelected && (
-            <button
-              id="btn-group-selected-cards"
-              onClick={onGroupSelected}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 rounded-lg transition-colors shrink-0"
-              title="Сгруппировать выделенные карточки"
-            >
-              <Layers className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Группа</span>
-            </button>
-          )}
-      </>
+    { id: 'group', desktopOnly: true, node: canGroup && onGroupSelected && (
+      <button id="btn-group-selected-cards" onClick={onGroupSelected} className={cell()} title="Сгруппировать выделенные карточки">
+        Группа
+      </button>
     ) },
     { id: 'links', desktopOnly: true, node: (
-      <>
-          {/* Connection Mode */}
-          <button
-            id="btn-toggle-connection-mode"
-            onClick={onToggleConnectionMode}
-            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-all shrink-0 cursor-pointer ${
-              isConnectionMode
-                ? 'bg-blue-600 text-white border-blue-700 shadow-xs ring-2 ring-blue-300'
-                : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200'
-            }`}
-            title="Режим связей (L)"
-          >
-            <Link2 className="w-3.5 h-3.5" />
-            <span className="hidden xl:inline">Связи (L)</span>
-          </button>
-      </>
+      <button id="btn-toggle-connection-mode" onClick={onToggleConnectionMode} className={cell(isConnectionMode)} title="Режим связей (L)">
+        Связи
+      </button>
     ) },
-    { id: 'mockup', desktopOnly: true, node: (
-      <>
-          {/* Site mockup behind the canvas */}
-          {onAddSiteMockup && (
-            <button
-              id="btn-topbar-site-mockup"
-              onClick={onAddSiteMockup}
-              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-all shrink-0 cursor-pointer ${
-                hasSiteMockup
-                  ? 'bg-teal-50 text-teal-800 border-teal-300'
-                  : 'bg-white hover:bg-teal-50 text-teal-700 border-teal-200'
-              }`}
-              title="Положить под доску скриншот сайта клиента и смотреть, как фото встанут на страницу"
-            >
-              <Monitor className="w-3.5 h-3.5" />
-              <span className="hidden xl:inline">Макет сайта</span>
-            </button>
-          )}
-      </>
+    { id: 'mockup', desktopOnly: true, node: onAddSiteMockup && (
+      <button
+        id="btn-topbar-site-mockup"
+        onClick={onAddSiteMockup}
+        className={cell(hasSiteMockup)}
+        title="Положить под доску скриншот сайта клиента и смотреть, как фото встанут на страницу"
+      >
+        Макет сайта
+      </button>
     ) },
   ];
 
@@ -314,55 +217,31 @@ export const TopBar: React.FC<TopBarProps> = ({
   }, [toolbarOrder]);
 
   return (
-    <header
-      id="app-topbar"
-      className="h-14 bg-white border-b border-gray-200 px-2 sm:px-3 md:px-4 flex items-center justify-between select-none z-30 shrink-0 shadow-xs gap-1.5 sm:gap-2"
-    >
-      {/* Brand & Left Projects Menu */}
-      <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
+    <header id="app-topbar" className="h-10 bg-white px-2 flex items-center justify-between gap-2 select-none z-30 shrink-0">
+      {/* Studio name, project, count */}
+      <div className="flex items-baseline gap-3 min-w-0 overflow-hidden text-[13px]">
         {onToggleSidebar && (
-          <button
-            id="btn-toggle-sidebar"
-            onClick={onToggleSidebar}
-            className="md:hidden p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors shrink-0"
-            title="Список проектов"
-            aria-label="Проекты"
-          >
-            <Menu className="w-4 h-4" />
+          <button id="btn-toggle-sidebar" onClick={onToggleSidebar} className="ofst-cell md:hidden -ml-2" title="Список проектов" aria-label="Проекты">
+            Проекты
           </button>
         )}
-
-        <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-xs text-white font-bold text-sm shrink-0">
-          <Camera className="w-4 h-4" />
-        </div>
-
-        <div className="min-w-0">
-          <div className="flex items-center gap-1">
-            <h1 className="font-semibold text-xs sm:text-sm md:text-base tracking-tight text-gray-900 truncate">
-              <span className="hidden sm:inline">AI Photo Studio</span>
-              <span className="sm:hidden truncate max-w-[90px]">{projectName}</span>
-            </h1>
-            <span className="hidden md:inline-block text-[10px] px-1.5 py-0.2 bg-gray-100 text-gray-600 border border-gray-200 rounded font-mono">
-              v1.3 · 19.10
-            </span>
-          </div>
-          <p className="hidden sm:block text-[10px] sm:text-[11px] text-gray-500 truncate max-w-[120px] md:max-w-xs">
-            {projectName} • {cardCount} фото
-            {selectedCount > 0 && (
-              <span className="ml-1 text-blue-600 font-medium">({selectedCount})</span>
-            )}
-          </p>
-        </div>
+        <span className="hidden sm:inline font-semibold tracking-[.02em] shrink-0">OFST Photo</span>
+        <span className="hidden sm:inline truncate text-[var(--grey)]">
+          {projectName} · {cardCount} фото
+          {selectedCount > 0 && <span className="ml-1 text-[var(--fg)]">· выбрано {selectedCount}</span>}
+        </span>
+        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.5 · 19.10</span>
       </div>
 
-      {/* Main Quick Action Buttons */}
-      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+      {/* Tools: text cells, reorderable by drag */}
+      <div className="flex items-center shrink-0">
         {orderedToolbar.map((item) => (
           <div
             key={item.id}
             draggable
             onDragStart={(e) => {
               setDragId(item.id);
+              setAddMenuOpen(false);
               e.dataTransfer.effectAllowed = 'move';
               e.dataTransfer.setData('application/x-aips-toolbar', item.id);
             }}
@@ -385,56 +264,28 @@ export const TopBar: React.FC<TopBarProps> = ({
               persistToolbarOrder();
               setDragId(null);
             }}
-            className={`${item.desktopOnly ? 'hidden lg:flex' : 'flex'} items-center gap-1 sm:gap-1.5 rounded-lg ${
-              dragId === item.id ? 'opacity-30 outline outline-2 outline-dashed outline-gray-300' : ''
-            } ${dragId ? 'cursor-grabbing' : ''}`}
+            className={`${item.desktopOnly ? 'hidden lg:flex' : 'flex'} ${dragId === item.id ? 'opacity-30' : ''} ${dragId ? 'cursor-grabbing' : ''}`}
             title="Перетащи, чтобы поменять порядок кнопок"
           >
             {item.node}
           </div>
         ))}
 
-        {/* Desktop-only Quick Right Actions */}
-        <div className="hidden lg:flex items-center gap-1 sm:gap-1.5">
-          <button
-            id="btn-topbar-settings"
-            onClick={onOpenSettings}
-            className="p-1.5 text-gray-700 hover:text-gray-900 bg-white hover:bg-gray-50 rounded-lg border border-gray-300 shadow-xs transition-colors cursor-pointer"
-            title="Настройки Gemini API"
-          >
-            <Settings className="w-4 h-4 text-gray-600" />
+        <span className="hidden lg:block w-3" />
+        <div className="hidden lg:flex items-center">
+          <button id="btn-topbar-settings" onClick={onOpenSettings} className="ofst-cell ofst-cell--muted" title="Настройки Gemini API">
+            Настройки
           </button>
-
-          <button
-            id="btn-top-export-json"
-            onClick={onExportProject}
-            className="p-1.5 text-xs font-medium bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 rounded-lg shadow-xs transition-colors cursor-pointer"
-            title="Скачать проект JSON"
-          >
-            <Download className="w-4 h-4 text-gray-600" />
+          <button id="btn-top-export-json" onClick={onExportProject} className="ofst-cell ofst-cell--muted" title="Скачать проект файлом JSON">
+            Скачать
           </button>
-
-          <button
-            id="btn-top-import-json"
-            onClick={onImportProject}
-            className="p-1.5 text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 rounded-lg shadow-xs transition-colors cursor-pointer"
-            title="Загрузить проект JSON"
-          >
-            <Upload className="w-4 h-4 text-gray-700" />
+          <button id="btn-top-import-json" onClick={onImportProject} className="ofst-cell ofst-cell--muted" title="Открыть проект из файла JSON">
+            Открыть
           </button>
         </div>
-
-        {/* Mobile & Tablet Right Drawer Menu Trigger (Sliders / Menu with other actions) */}
         {onOpenRightDrawer && (
-          <button
-            id="btn-open-right-actions-drawer"
-            onClick={onOpenRightDrawer}
-            className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-lg transition-colors cursor-pointer shrink-0"
-            title="Все инструменты и настройки"
-            aria-label="Меню инструментов"
-          >
-            <SlidersHorizontal className="w-4 h-4 text-gray-700" />
-            <span className="hidden sm:inline">Меню</span>
+          <button id="btn-open-right-actions-drawer" onClick={onOpenRightDrawer} className="ofst-cell ofst-cell--muted" title="Все инструменты и настройки" aria-label="Меню инструментов">
+            Меню
           </button>
         )}
       </div>

@@ -1831,71 +1831,75 @@ export default function App() {
   return (
     <div
       id="ai-product-photo-studio"
-      className="flex flex-col w-screen h-screen overflow-hidden bg-[#f3f4f6] text-[#1f2937] font-sans relative"
+      className="flex flex-col w-screen h-screen overflow-hidden bg-white text-[var(--fg)] font-sans relative"
     >
       {/* Storage Warning Banner (>80%) */}
       {pendingFolder && (
-        <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" onClick={() => setPendingFolder(null)}>
-          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
-            <div>
-              <h3 className="text-sm font-semibold text-gray-900">Что в этой папке?</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {pendingFolder.files.length} фото, папок внутри: {groupByFolder(pendingFolder.files).length}
-              </p>
+        <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-2" onClick={() => setPendingFolder(null)}>
+          <div className="w-full max-w-sm bg-white p-2" onClick={(e) => e.stopPropagation()}>
+            <div className="ofst-run">
+              <span>Что в этой папке?</span>
+              <span>
+                {pendingFolder.files.length} фото · папок {groupByFolder(pendingFolder.files).length}
+              </span>
             </div>
             <button
-              className="w-full text-left p-3 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 cursor-pointer"
+              className="w-full text-left p-2 mt-1 hover:bg-[var(--fg)] hover:text-white group cursor-pointer"
               onClick={() => {
                 const f = pendingFolder.files;
                 setPendingFolder(null);
                 handleImportFolderAsProducts(f);
               }}
             >
-              <div className="text-sm font-semibold text-blue-900">Продукты / позиции меню</div>
-              <div className="text-[11px] text-blue-800/80">В библиотеку продуктов. Название = имя файла, категория = подпапка. Если позиция уже есть — к ней добавится фото.</div>
+              <div className="text-[clamp(20px,1.8vw,26px)] font-medium leading-tight tracking-[-.01em]">Продукты</div>
+              <div className="text-[12px] text-[var(--grey)] group-hover:text-white/70 leading-snug">
+                В позиции. Название = имя файла, категория = подпапка. Если позиция уже есть, фото добавится к ней.
+              </div>
             </button>
             <button
-              className="w-full text-left p-3 rounded-xl border border-gray-200 hover:bg-gray-50 cursor-pointer"
+              className="w-full text-left p-2 hover:bg-[var(--fg)] hover:text-white group cursor-pointer"
               onClick={() => {
                 const { files, pos } = pendingFolder;
                 setPendingFolder(null);
                 handleAddFolder(files, pos);
               }}
             >
-              <div className="text-sm font-semibold text-gray-900">Фото на доску</div>
-              <div className="text-[11px] text-gray-500">Референсы и всё остальное: каждая подпапка станет группой на доске.</div>
+              <div className="text-[clamp(20px,1.8vw,26px)] font-medium leading-tight tracking-[-.01em]">Фото на доску</div>
+              <div className="text-[12px] text-[var(--grey)] group-hover:text-white/70 leading-snug">Референсы и всё остальное: каждая подпапка станет группой.</div>
             </button>
-            <button className="w-full text-xs text-gray-500 hover:text-gray-800 py-1 cursor-pointer" onClick={() => setPendingFolder(null)}>
-              Отмена
-            </button>
+            <div className="flex justify-end">
+              <button className="ofst-cell ofst-cell--muted" onClick={() => setPendingFolder(null)}>
+                Отмена
+              </button>
+            </div>
           </div>
         </div>
       )}
       {folderImportStatus && (
-        <div className="bg-black text-white text-xs px-4 py-2 z-40">{folderImportStatus}</div>
+        <div className="bg-[var(--fg)] text-white text-[12px] px-2 py-1 z-40">{folderImportStatus}</div>
       )}
       {storageWarning && (
         <div
           id="storage-warning-banner"
-          className="bg-amber-500 text-white text-xs px-4 py-2 flex items-center justify-between shadow-md z-40 animate-fade-in"
+          className="bg-[var(--marker)] text-[var(--fg)] text-[12px] px-2 py-1 flex items-center justify-between z-40"
         >
           <div className="flex items-center gap-2 font-medium">
-            <span>⚠️ {storageWarning}</span>
+            <span>{storageWarning}</span>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={handleOptimizeMemory}
               disabled={isOptimizing}
-              className="bg-white text-amber-700 font-semibold px-2.5 py-1 rounded text-xs hover:bg-amber-50 transition-colors shadow-xs"
+              className="underline font-medium"
             >
-              {isOptimizing ? 'Сжатие...' : 'Оптимизировать память'}
+              {isOptimizing ? 'Сжимаю…' : 'Сжать картинки'}
             </button>
             <button
               onClick={() => setStorageWarning(null)}
-              className="text-white hover:text-amber-100 p-1 text-xs opacity-80 hover:opacity-100"
+              className="underline"
               title="Закрыть"
             >
-              ✕
+              ок
             </button>
           </div>
         </div>

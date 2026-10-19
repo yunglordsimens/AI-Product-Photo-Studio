@@ -1,22 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import {
-  Sparkles,
-  X,
-  Loader2,
-  GripHorizontal,
-  AlertCircle,
-  Settings,
-  Image as ImageIcon,
-  StickyNote,
-  Paperclip,
-  MapPin,
-  BookOpen,
-  Package,
-  Layers,
-  CheckSquare,
-  Square,
-  Check,
-} from 'lucide-react';
 import { Card, MasterPrompt, Note, ProductItem } from '../types';
 
 export interface ConsideredNoteInfo {
@@ -319,789 +301,374 @@ export function GenerationPanel({
     'Чистый минималистичный белый фон с мягкими тенями',
   ];
 
+  // Small shared pieces, so both tabs look the same
+  const thumbs = (size: string) =>
+    selectedCards.length === 0 ? (
+      <p className="text-[12px] text-[var(--grey)] py-1">Выдели на доске 1–5 фото (Shift+клик или рамкой)</p>
+    ) : (
+      <div className="flex gap-0.5 overflow-x-auto custom-scrollbar">
+        {selectedCards.slice(0, 5).map((card, idx) => (
+          <div key={card.id} className={`relative group shrink-0 ${size} bg-[var(--soft)]`}>
+            <img src={card.src} alt={card.name || `Ref ${idx + 1}`} className="w-full h-full object-cover" />
+            {onDeselectCard && (
+              <button
+                type="button"
+                onClick={() => onDeselectCard(card.id)}
+                className="absolute top-0 right-0 hidden group-hover:block bg-white px-1 text-[11px] leading-4 hover:bg-[var(--marker)] cursor-pointer"
+                title="Убрать из выделения"
+              >
+                убрать
+              </button>
+            )}
+          </div>
+        ))}
+        {selectedCards.length > 5 && (
+          <div className={`shrink-0 ${size} bg-[var(--soft)] flex items-center justify-center text-[12px]`}>
+            +{selectedCards.length - 5}
+          </div>
+        )}
+      </div>
+    );
+
+  const masterSelect = (id: string, label: string) => (
+    <div>
+      <div className="ofst-run mb-1">
+        <label htmlFor={id}>{label}</label>
+        {onOpenMasterPrompts && (
+          <button type="button" onClick={onOpenMasterPrompts} className="hover:text-[var(--fg)] cursor-pointer">
+            все промпты
+          </button>
+        )}
+      </div>
+      <select id={id} value={selectedMasterPromptId} onChange={handleMasterPromptSelect} className="w-full h-8 px-2 text-[13px]">
+        <option value="">— без мастер-промпта —</option>
+        {masterPrompts.map((mp) => (
+          <option key={mp.id} value={mp.id}>
+            {mp.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  const promptBox = (id: string, label: string, placeholder: string) => (
+    <div>
+      <div className="ofst-run mb-1">
+        <label htmlFor={id}>{label}</label>
+        {prompt && (
+          <button
+            type="button"
+            onClick={() => {
+              setPrompt('');
+              setSelectedMasterPromptId('');
+            }}
+            className="hover:text-[var(--fg)] cursor-pointer"
+          >
+            очистить
+          </button>
+        )}
+      </div>
+      <textarea
+        ref={textareaRef}
+        id={id}
+        rows={3}
+        value={prompt}
+        onChange={handlePromptChange}
+        placeholder={placeholder}
+        className="w-full p-2 text-[13px] resize-none leading-snug"
+      />
+    </div>
+  );
+
   return (
     <>
-      {/* Mobile Backdrop for bottom sheet */}
-      <div
-        onClick={onClose}
-        className="fixed inset-0 bg-black/30 backdrop-blur-xs z-40 sm:hidden animate-in fade-in duration-150"
-      />
+      {/* Mobile backdrop for the bottom sheet */}
+      <div onClick={onClose} className="fixed inset-0 bg-black/30 z-40 sm:hidden" />
 
+      {/* Docked on the right under the top bar (desktop), bottom sheet on phones */}
       <div
         ref={panelRef}
         id="generation-floating-panel"
-        style={
-          window.innerWidth >= 640 && position
-            ? { left: `${position.x}px`, top: `${position.y}px`, bottom: 'auto' }
-            : {}
-        }
-        className={`fixed z-50 bg-white border border-gray-200 shadow-2xl text-gray-800 transition-[box-shadow]
-          /* Mobile style: bottom sheet occupying lower half */
-          inset-x-0 bottom-0 max-h-[75vh] sm:max-h-[85vh] w-full rounded-t-2xl rounded-b-none border-t border-gray-200 overflow-y-auto
-          /* Desktop style: 420px floating window */
-          sm:inset-x-auto sm:w-[420px] sm:rounded-2xl sm:overflow-hidden sm:border
-        `}
+        className="fixed z-50 bg-white text-[var(--fg)] inset-x-0 bottom-0 max-h-[75vh] w-full overflow-y-auto custom-scrollbar
+          sm:inset-x-auto sm:right-0 sm:top-10 sm:bottom-0 sm:max-h-none sm:w-[400px]"
       >
-        {/* Header - Drag handle on desktop, bottom sheet grab bar on mobile */}
-        <div
-          onMouseDown={handleMouseDown}
-          className="sticky top-0 z-10 px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 flex items-center justify-between cursor-default sm:cursor-move select-none"
-        >
-          <div className="flex items-center gap-2">
-            <GripHorizontal className="hidden sm:block w-4 h-4 text-gray-400" />
-            <div className="w-6 h-6 rounded-md bg-purple-600 text-white flex items-center justify-center shadow-xs">
-              <Sparkles className="w-3.5 h-3.5" />
-            </div>
-            <h3 className="text-xs sm:text-sm font-semibold text-gray-900 tracking-tight">
-              AI Генерация фото
-            </h3>
+        <div className="sticky top-0 z-10 bg-white px-2 pt-2 select-none">
+          <div className="ofst-run">
+            <span>AI генерация</span>
+            <span className="flex gap-3">
+              <button type="button" onClick={onOpenSettings} className="hover:text-[var(--fg)] cursor-pointer" title="Настройки API">
+                настройки
+              </button>
+              <button type="button" onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer" title="Закрыть панель (G)">
+                закрыть
+              </button>
+            </span>
           </div>
-
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-200/60 rounded-lg transition-colors cursor-pointer"
-              title="Настройки API"
-            >
-              <Settings className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-200/60 rounded-lg transition-colors cursor-pointer"
-              title="Закрыть панель (G)"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Mode Tabs: Single vs Batch */}
-        <div className="px-3.5 pt-2.5 bg-gray-50/50 border-b border-gray-200">
-          <div className="grid grid-cols-2 gap-1.5 p-1 bg-gray-200/70 rounded-xl">
+          <div className="flex pt-0.5">
             <button
               type="button"
               id="tab-single-generation"
               onClick={() => setActiveTab('single')}
-              className={`py-1.5 px-3 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                activeTab === 'single'
-                  ? 'bg-white text-gray-900 shadow-xs'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/40'
-              }`}
+              className={`ofst-cell ${activeTab === 'single' ? 'is-on' : ''}`}
             >
-              <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-              <span>Одиночная</span>
+              Одно фото
             </button>
-
             <button
               type="button"
               id="tab-batch-generation"
               onClick={() => setActiveTab('batch')}
-              className={`py-1.5 px-3 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                activeTab === 'batch'
-                  ? 'bg-white text-gray-900 shadow-xs'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/40'
-              }`}
+              className={`ofst-cell ${activeTab === 'batch' ? 'is-on' : ''}`}
             >
-              <Layers className="w-3.5 h-3.5 text-blue-600" />
-              <span>Пакетная генерация</span>
-              {selectedBatchProductIds.size > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.2 bg-blue-100 text-blue-700 font-bold text-[10px] rounded-full">
-                  {selectedBatchProductIds.size}
-                </span>
-              )}
+              Пачкой{selectedBatchProductIds.size > 0 ? ` (${selectedBatchProductIds.size})` : ''}
             </button>
           </div>
         </div>
 
-        {/* Error Alert */}
+        {/* Error: yellow marker line, no box */}
         {errorMessage && (
-          <div className="mx-3.5 mt-3 p-2.5 bg-red-50 border border-red-200 rounded-lg flex items-start justify-between gap-2 text-xs text-red-700">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-semibold">Внимание: </span>
-                <span>{errorMessage}</span>
-                {errorMessage.includes('API-ключ') && (
-                  <button
-                    type="button"
-                    onClick={onOpenSettings}
-                    className="ml-1 font-semibold underline hover:text-red-900"
-                  >
-                    Настройки
-                  </button>
-                )}
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onClearError}
-              className="p-0.5 text-red-400 hover:text-red-700 rounded cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
+          <div className="mx-2 mt-2 p-2 bg-[var(--marker)] text-[13px] leading-snug flex items-start justify-between gap-2">
+            <span>
+              {errorMessage}
+              {errorMessage.includes('API-ключ') && (
+                <button type="button" onClick={onOpenSettings} className="ml-1 underline cursor-pointer">
+                  Настройки
+                </button>
+              )}
+            </span>
+            <button type="button" onClick={onClearError} className="shrink-0 underline cursor-pointer">
+              ок
             </button>
           </div>
         )}
 
-        {/* Batch Progress Indicator Banner */}
+        {/* Batch progress: a line that fills */}
         {isGenerating && batchProgress && (
-          <div className="mx-3.5 mt-3 p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1.5 animate-in fade-in">
-            <div className="flex items-center justify-between text-xs font-semibold text-blue-900">
-              <div className="flex items-center gap-1.5">
-                <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin" />
-                <span>Генерация: {batchProgress.current} из {batchProgress.total}...</span>
-              </div>
-              <span className="text-[11px] text-blue-700">
-                {Math.round((batchProgress.current / batchProgress.total) * 100)}%
+          <div className="mx-2 mt-2">
+            <div className="ofst-run">
+              <span>
+                Генерация {batchProgress.current} из {batchProgress.total}
+                {batchProgress.productName ? ` · ${batchProgress.productName}` : ''}
               </span>
+              <span>{Math.round((batchProgress.current / batchProgress.total) * 100)}%</span>
             </div>
-            {batchProgress.productName && (
-              <div className="text-[11px] text-blue-700 truncate">
-                Товар: <span className="font-medium">{batchProgress.productName}</span>
-              </div>
-            )}
-            <div className="w-full bg-blue-200/80 h-1.5 rounded-full overflow-hidden">
-              <div
-                className="bg-blue-600 h-full rounded-full transition-all duration-300"
-                style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
-              />
+            <div className="h-1 bg-[var(--soft)]">
+              <div className="h-full bg-[var(--fg)] transition-all duration-300" style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }} />
             </div>
           </div>
         )}
 
-        {/* TAB 1: SINGLE GENERATION */}
+        {/* TAB 1: one photo */}
         {activeTab === 'single' && (
-          <form onSubmit={handleSingleSubmit} className="p-3.5 sm:p-4 space-y-3">
-            {/* Selected References Thumbnails Bar */}
+          <form onSubmit={handleSingleSubmit} className="p-2 space-y-3">
             <div>
-              <div className="flex items-center justify-between text-[11px] mb-1 text-gray-500">
-                <span className="font-semibold text-gray-700">
-                  Выделенные фото ({selectedCards.length}/5)
-                </span>
-                {!isProductReplacementMode && (
-                  <div className="flex items-center gap-0.5 p-0.5 bg-gray-100 rounded-lg">
-                    {(['product', 'style'] as const).map((r) => (
-                      <button
-                        key={r}
-                        type="button"
-                        onClick={() => setPhotoRole(r)}
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-medium cursor-pointer ${
-                          photoRole === r ? 'bg-white text-gray-900 shadow-2xs' : 'text-gray-500 hover:text-gray-800'
-                        }`}
-                      >
-                        {r === 'product' ? 'это продукт' : 'это пример стиля'}
-                      </button>
-                    ))}
-                  </div>
-                )}
+              <div className="ofst-run mb-1">
+                <span>Выделенные фото {selectedCards.length}/5</span>
+                <span className="text-[var(--grey)]">{consideredNotes.length > 0 ? `+ ${consideredNotes.length} заметки` : ''}</span>
               </div>
-              <p className="text-[10px] text-gray-400 mb-1 leading-snug">
+              {!isProductReplacementMode && (
+                <div className="flex mb-1">
+                  {(['product', 'style'] as const).map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setPhotoRole(r)}
+                      className={`ofst-cell ${photoRole === r ? 'is-on' : ''}`}
+                    >
+                      {r === 'product' ? 'это продукт' : 'это пример стиля'}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {thumbs('w-16 h-16')}
+              <p className="mt-1 text-[12px] text-[var(--grey)] leading-snug">
                 {isProductReplacementMode
                   ? 'С них берутся сцена, свет и фон; продукт — из библиотеки.'
                   : photoRole === 'product'
-                  ? 'Продукт остаётся как есть, а сцену, свет и фон задаёт промпт или мастер-промпт.'
+                  ? 'Продукт остаётся как есть, сцену, свет и фон задаёт промпт или мастер-промпт.'
                   : 'С них берутся свет, фон, цвет и ракурс; что изобразить — пишешь в промпте.'}
               </p>
+            </div>
 
-              {selectedCards.length === 0 ? (
-                <div className="py-2.5 px-3 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex items-center justify-center gap-2 text-xs text-gray-500">
-                  <ImageIcon className="w-4 h-4 text-gray-400" />
-                  <span className="text-[11px]">Выдели на доске 1–5 фото (Shift+клик или рамкой)</span>
+            {/* Notes that go into the prompt */}
+            {consideredNotes.length > 0 && (
+              <div>
+                <div className="ofst-run mb-1">
+                  <span>Заметки в промпт</span>
+                  <span>{consideredNotes.length}</span>
                 </div>
-              ) : (
-                <div className="flex items-center gap-1.5 overflow-x-auto p-1.5 bg-gray-50 border border-gray-200 rounded-xl custom-scrollbar">
-                  {selectedCards.slice(0, 5).map((card, idx) => (
-                    <div
-                      key={card.id}
-                      className="relative group shrink-0 w-12 h-12 bg-white rounded-lg border border-gray-200 overflow-hidden shadow-xs"
-                    >
-                      <img
-                        src={card.src}
-                        alt={card.name || `Ref ${idx + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        {onDeselectCard && (
-                          <button
-                            type="button"
-                            onClick={() => onDeselectCard(card.id)}
-                            className="p-1 bg-red-500 text-white rounded-full hover:bg-red-600 cursor-pointer"
-                            title="Убрать"
-                          >
-                            <X className="w-2.5 h-2.5" />
-                          </button>
-                        )}
-                      </div>
+                <div className="max-h-28 overflow-y-auto custom-scrollbar space-y-0.5">
+                  {consideredNotes.map((note) => (
+                    <div key={note.id} className="flex items-baseline gap-2 bg-[var(--soft)] px-2 py-1 text-[12px] leading-snug">
+                      <span className="flex-1 min-w-0 break-words">{note.text || '(пустая заметка)'}</span>
+                      <span className="shrink-0 text-[11px] text-[var(--grey)]">{note.isAttached ? 'прикреплена' : 'рядом'}</span>
                     </div>
                   ))}
-                  {selectedCards.length > 5 && (
-                    <div className="shrink-0 w-12 h-12 bg-gray-200 rounded-lg border border-gray-300 flex items-center justify-center text-xs font-semibold text-gray-600">
-                      +{selectedCards.length - 5}
-                    </div>
-                  )}
                 </div>
-              )}
-            </div>
-
-            {/* Considered Sticky Notes Section */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-[11px] text-gray-500">
-                <div className="flex items-center gap-1 font-semibold text-gray-700">
-                  <StickyNote className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Заметки в промпт</span>
-                </div>
-                <span className="text-[10px] text-gray-400">
-                  {consideredNotes.length > 0
-                    ? `${consideredNotes.length} шт., добавятся к промпту`
-                    : 'собираются сами'}
-                </span>
               </div>
+            )}
 
-              {consideredNotes.length === 0 ? (
-                <div className="py-2 px-3 bg-amber-50/50 border border-amber-200/60 rounded-xl flex items-center gap-2 text-xs text-amber-700/80">
-                  <span className="text-amber-500">ℹ️</span>
-                  <span className="text-[11px]">
-                    Заметки, прикреплённые к выделенным фото или лежащие рядом с ними, сами попадут в промпт. Новая заметка — двойной клик по доске.
-                  </span>
-                </div>
-              ) : (
-                <div className="max-h-24 overflow-y-auto space-y-1.5 p-1.5 bg-gray-50 border border-gray-200 rounded-xl custom-scrollbar">
-                  {consideredNotes.map((note) => {
-                    const bgClass =
-                      note.color === 'yellow'
-                        ? 'bg-yellow-100/90 text-yellow-900 border-yellow-300'
-                        : note.color === 'pink'
-                        ? 'bg-pink-100/90 text-pink-900 border-pink-300'
-                        : note.color === 'blue'
-                        ? 'bg-sky-100/90 text-sky-900 border-sky-300'
-                        : note.color === 'green'
-                        ? 'bg-emerald-100/90 text-emerald-900 border-emerald-300'
-                        : 'bg-white text-gray-800 border-gray-200';
-
-                    return (
-                      <div
-                        key={note.id}
-                        className={`p-2 rounded-lg border text-xs flex items-start justify-between gap-2 shadow-2xs ${bgClass}`}
-                      >
-                        <div className="flex items-start gap-1.5 flex-1 min-w-0">
-                          {note.isAttached ? (
-                            <Paperclip className="w-3.5 h-3.5 shrink-0 mt-0.5 text-blue-600" />
-                          ) : (
-                            <MapPin className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-600" />
-                          )}
-                          <span className="break-words font-medium leading-tight">
-                            {note.text || '(Пустая заметка)'}
-                          </span>
-                        </div>
-                        <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-black/5 shrink-0">
-                          {note.isAttached ? 'Прикреплена' : 'Рядом'}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Product Replacement Mode Toggle & Selector */}
-            <div
-              className={`p-2.5 rounded-xl border transition-all ${
-                isProductReplacementMode
-                  ? 'bg-blue-50/80 border-blue-200'
-                  : 'bg-gray-50/70 border-gray-200'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    id="toggle-product-replacement-mode"
-                    checked={isProductReplacementMode}
-                    onChange={(e) => setIsProductReplacementMode(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
-                  />
-                  <div className="flex items-center gap-1.5 font-semibold text-xs text-gray-800">
-                    <Package className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Поставить мой продукт в эту сцену</span>
-                  </div>
-                </label>
+            {/* Put my product into this scene */}
+            <div>
+              <label className="flex items-center gap-2 cursor-pointer select-none text-[13px]">
+                <input
+                  type="checkbox"
+                  id="toggle-product-replacement-mode"
+                  checked={isProductReplacementMode}
+                  onChange={(e) => setIsProductReplacementMode(e.target.checked)}
+                  className="w-3.5 h-3.5 accent-black cursor-pointer"
+                />
+                <span>Поставить мой продукт в эту сцену</span>
                 {isProductReplacementMode && onOpenProducts && (
-                  <button
-                    type="button"
-                    onClick={onOpenProducts}
-                    className="text-[10px] text-blue-600 hover:text-blue-800 underline font-medium cursor-pointer"
-                  >
-                    Библиотека
+                  <button type="button" onClick={onOpenProducts} className="ml-auto text-[12px] underline cursor-pointer">
+                    продукты
                   </button>
                 )}
-              </div>
-              <p className="mt-1 text-[10px] text-gray-500 leading-snug">
-                Сцена, свет и фон берутся с выделенных фото, а продукт — твой, из библиотеки.
-              </p>
-
-              {isProductReplacementMode && (
-                <div className="mt-2 pt-2 border-t border-blue-100 space-y-1.5 animate-in fade-in duration-150">
-                  {products.length === 0 ? (
-                    <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-center justify-between gap-2">
-                      <span className="text-[11px]">
-                        Добавьте продукты в библиотеку (кнопка Продукты)
-                      </span>
-                      {onOpenProducts && (
-                        <button
-                          type="button"
-                          onClick={onOpenProducts}
-                          className="px-2 py-0.5 bg-amber-600 text-white rounded text-[10px] font-medium hover:bg-amber-700 shrink-0 cursor-pointer"
-                        >
-                          Добавить
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <select
-                        id="gen-product-select"
-                        value={selectedProductId}
-                        onChange={(e) => setSelectedProductId(e.target.value)}
-                        className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-blue-200 rounded-lg text-gray-800 focus:outline-none focus:border-blue-500"
-                      >
-                        {products.map((prod) => (
-                          <option key={prod.id} value={prod.id}>
-                            {prod.name || 'Без названия'}
-                          </option>
-                        ))}
-                      </select>
-
-                      {/* Mini preview thumbnail of chosen product */}
-                      {(() => {
-                        const currentProd = products.find((p) => p.id === selectedProductId);
-                        if (currentProd?.photoDataUrl) {
-                          return (
-                            <div
-                              className="w-8 h-8 rounded-md border border-blue-200 overflow-hidden bg-white shrink-0 shadow-2xs"
-                              title={currentProd.name}
-                            >
-                              <img
-                                src={currentProd.photoDataUrl}
-                                alt={currentProd.name}
-                                className="w-full h-full object-cover"
-                              />
-                            </div>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Master Prompt Selector */}
-            <div className="space-y-1 bg-purple-50/60 p-2 rounded-xl border border-purple-100">
-              <div className="flex items-center justify-between text-[11px]">
-                <label
-                  htmlFor="gen-master-prompt-select"
-                  className="flex items-center gap-1 font-semibold text-purple-900"
-                >
-                  <BookOpen className="w-3.5 h-3.5 text-purple-600" />
-                  <span>Мастер-промпт:</span>
-                </label>
-                {onOpenMasterPrompts && (
-                  <button
-                    type="button"
-                    onClick={onOpenMasterPrompts}
-                    className="text-purple-600 hover:text-purple-800 text-[10px] font-medium underline cursor-pointer"
-                  >
-                    Управление
-                  </button>
-                )}
-              </div>
-              <select
-                id="gen-master-prompt-select"
-                value={selectedMasterPromptId}
-                onChange={handleMasterPromptSelect}
-                className="w-full px-2.5 py-1.5 text-xs bg-white border border-purple-200 rounded-lg text-gray-800 focus:outline-none focus:border-purple-500 transition-colors"
-              >
-                <option value="">— Выберите мастер-промпт (или введите свой) —</option>
-                {masterPrompts.map((mp) => (
-                  <option key={mp.id} value={mp.id}>
-                    {mp.name}
-                  </option>
+              </label>
+              {isProductReplacementMode &&
+                (products.length === 0 ? (
+                  <p className="mt-1 text-[12px] text-[var(--grey)]">
+                    В библиотеке пока нет продуктов.{' '}
+                    {onOpenProducts && (
+                      <button type="button" onClick={onOpenProducts} className="underline text-[var(--fg)] cursor-pointer">
+                        Добавить
+                      </button>
+                    )}
+                  </p>
+                ) : (
+                  <div className="mt-1 flex items-center gap-0.5">
+                    <select
+                      id="gen-product-select"
+                      value={selectedProductId}
+                      onChange={(e) => setSelectedProductId(e.target.value)}
+                      className="flex-1 h-8 px-2 text-[13px]"
+                    >
+                      {products.map((prod) => (
+                        <option key={prod.id} value={prod.id}>
+                          {prod.name || 'Без названия'}
+                        </option>
+                      ))}
+                    </select>
+                    {(() => {
+                      const currentProd = products.find((p) => p.id === selectedProductId);
+                      return currentProd?.photoDataUrl ? (
+                        <img src={currentProd.photoDataUrl} alt={currentProd.name} title={currentProd.name} className="w-8 h-8 object-cover bg-[var(--soft)] shrink-0" />
+                      ) : null;
+                    })()}
+                  </div>
                 ))}
-              </select>
             </div>
 
-            {/* Prompt Input */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <label htmlFor="gen-prompt-input" className="block text-xs font-semibold text-gray-700">
-                  Описание сцены (промпт)
-                </label>
-                {prompt && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrompt('');
-                      setSelectedMasterPromptId('');
-                    }}
-                    className="text-[10px] text-gray-400 hover:text-red-500 cursor-pointer"
-                  >
-                    Очистить
-                  </button>
-                )}
-              </div>
-              <textarea
-                ref={textareaRef}
-                id="gen-prompt-input"
-                rows={2}
-                value={prompt}
-                onChange={handlePromptChange}
-                placeholder="Опишите желаемую сцену, окружение или освещение..."
-                className="w-full p-2.5 text-xs bg-gray-50 border border-gray-300 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-colors resize-none leading-relaxed"
-              />
-            </div>
+            {masterSelect('gen-master-prompt-select', 'Мастер-промпт')}
+            {promptBox('gen-prompt-input', 'Сцена (промпт)', 'Сцена, окружение, свет…')}
 
-            {/* Prompt presets / pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar text-[10px]">
-              <span className="text-gray-400 shrink-0 font-medium">Идеи:</span>
+            <div className="flex flex-wrap gap-0">
               {samplePrompts.map((p, i) => (
                 <button
                   key={i}
                   type="button"
                   onClick={() => {
                     setPrompt(p);
-                    if (textareaRef.current) {
-                      textareaRef.current.style.height = 'auto';
-                    }
+                    if (textareaRef.current) textareaRef.current.style.height = 'auto';
                   }}
-                  className="px-2 py-1 bg-gray-100 hover:bg-purple-50 hover:text-purple-700 text-gray-600 rounded-full border border-gray-200 shrink-0 transition-colors whitespace-nowrap cursor-pointer"
+                  className="ofst-cell ofst-cell--muted !h-6 !px-1.5 !text-[12px]"
+                  title={p}
                 >
-                  {p.slice(0, 24)}...
+                  {p.slice(0, 22)}…
                 </button>
               ))}
             </div>
 
-            {/* Footer & Submit Button */}
-            <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-2">
-              <span className="hidden sm:inline text-[10px] text-gray-400">
-                Горячая клавиша: <kbd className="px-1 py-0.5 bg-gray-100 border rounded font-mono">G</kbd>
-              </span>
-
-              <div className="flex items-center gap-2 ml-auto">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
-                >
-                  Закрыть
-                </button>
-
-                <button
-                  type="submit"
-                  id="btn-trigger-generate"
-                  disabled={isGenerating}
-                  className={`px-4 py-2 text-xs font-semibold rounded-lg shadow-xs flex items-center gap-1.5 transition-all cursor-pointer ${
-                    isGenerating
-                      ? 'bg-purple-400 text-white cursor-not-allowed'
-                      : 'bg-purple-600 hover:bg-purple-700 text-white shadow-purple-500/20'
-                  }`}
-                >
-                  {isGenerating ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Генерация...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Сгенерировать</span>
-                    </>
-                  )}
-                </button>
-              </div>
+            <div className="sticky bottom-0 bg-white pt-1 pb-2 flex items-center justify-between">
+              <span className="hidden sm:inline text-[11px] text-[var(--grey)]">G — открыть / закрыть</span>
+              <button type="submit" id="btn-trigger-generate" disabled={isGenerating} className="ofst-cell ofst-cell--primary !h-9 !px-4">
+                {isGenerating ? 'Генерация…' : 'Сгенерировать'}
+              </button>
             </div>
           </form>
         )}
 
-        {/* TAB 2: BATCH GENERATION */}
+        {/* TAB 2: batch over products */}
         {activeTab === 'batch' && (
-          <form onSubmit={handleBatchSubmit} className="p-3.5 sm:p-4 space-y-3">
-            {/* Batch Info Header */}
-            <div className="flex items-center justify-between text-xs">
-              <div className="font-semibold text-gray-800 flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-blue-600" />
-                <span>Продукты для пакета:</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSelectAllBatch}
-                  className="text-[11px] text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
-                >
-                  Выбрать все
-                </button>
-                <span className="text-gray-300">•</span>
-                <button
-                  type="button"
-                  onClick={handleDeselectAllBatch}
-                  className="text-[11px] text-gray-500 hover:text-gray-800 font-medium cursor-pointer"
-                >
-                  Снять все
-                </button>
-              </div>
-            </div>
-
-            {/* Product Checkboxes List */}
-            {products.length === 0 ? (
-              <div className="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-center space-y-2">
-                <Package className="w-6 h-6 text-gray-400 mx-auto" />
-                <p className="text-xs text-gray-600">
-                  В библиотеке нет продуктов. Добавьте товары с фото для пакетной генерации.
-                </p>
-                {onOpenProducts && (
-                  <button
-                    type="button"
-                    onClick={onOpenProducts}
-                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors cursor-pointer"
-                  >
-                    Открыть библиотеку продуктов
+          <form onSubmit={handleBatchSubmit} className="p-2 space-y-3">
+            <div>
+              <div className="ofst-run mb-1">
+                <span>
+                  Продукты {selectedBatchProductIds.size} из {products.length}
+                  {selectedBatchProductIds.size < 2 ? ' · нужно минимум 2' : ''}
+                </span>
+                <span className="flex gap-3">
+                  <button type="button" onClick={handleSelectAllBatch} className="hover:text-[var(--fg)] cursor-pointer">
+                    все
                   </button>
-                )}
+                  <button type="button" onClick={handleDeselectAllBatch} className="hover:text-[var(--fg)] cursor-pointer">
+                    снять
+                  </button>
+                </span>
               </div>
-            ) : (
-              <div className="max-h-44 overflow-y-auto space-y-1.5 p-1 bg-gray-50/80 border border-gray-200 rounded-xl custom-scrollbar">
-                {products.map((prod) => {
-                  const isSelected = selectedBatchProductIds.has(prod.id);
-                  const hasPhoto = Boolean(prod.photoDataUrl);
-
-                  return (
-                    <label
-                      key={prod.id}
-                      className={`flex items-center justify-between gap-2.5 p-2 rounded-lg border transition-all cursor-pointer select-none ${
-                        isSelected
-                          ? 'bg-blue-50 border-blue-300 shadow-2xs'
-                          : 'bg-white border-gray-200 hover:bg-gray-100/70'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
+              {products.length === 0 ? (
+                <p className="text-[12px] text-[var(--grey)]">
+                  В библиотеке нет продуктов.{' '}
+                  {onOpenProducts && (
+                    <button type="button" onClick={onOpenProducts} className="underline text-[var(--fg)] cursor-pointer">
+                      Открыть продукты
+                    </button>
+                  )}
+                </p>
+              ) : (
+                <div className="max-h-56 overflow-y-auto custom-scrollbar space-y-0.5">
+                  {products.map((prod) => {
+                    const isSelected = selectedBatchProductIds.has(prod.id);
+                    const hasPhoto = Boolean(prod.photoDataUrl);
+                    return (
+                      <label
+                        key={prod.id}
+                        className={`flex items-center gap-2 pr-2 cursor-pointer select-none text-[13px] ${
+                          isSelected ? 'bg-[var(--fg)] text-white' : 'bg-[var(--soft)] hover:bg-[var(--soft-2)]'
+                        }`}
+                      >
                         <input
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => handleToggleBatchProduct(prod.id)}
-                          className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer shrink-0"
+                          className="sr-only"
                         />
-
-                        {/* Thumbnail */}
-                        <div className="w-8 h-8 rounded-md border border-gray-200 bg-gray-100 overflow-hidden shrink-0 flex items-center justify-center">
-                          {hasPhoto ? (
-                            <img
-                              src={prod.photoDataUrl}
-                              alt={prod.name}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <ImageIcon className="w-3.5 h-3.5 text-gray-400" />
-                          )}
-                        </div>
-
-                        {/* Name */}
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-gray-900 truncate">
-                            {prod.name || 'Без названия'}
-                          </div>
-                          {!hasPhoto && (
-                            <span className="text-[10px] text-amber-600 font-medium">
-                              Нет фото (генерация невозможна)
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {isSelected && (
-                        <span className="text-[10px] font-bold text-blue-600 px-1.5 py-0.5 bg-blue-100/80 rounded-full shrink-0">
-                          В пакете
+                        <span className="w-9 h-9 shrink-0 bg-[var(--soft-2)]">
+                          {hasPhoto && <img src={prod.photoDataUrl} alt={prod.name} className="w-full h-full object-cover" />}
                         </span>
-                      )}
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Selection Status Badge */}
-            <div className="flex items-center justify-between text-[11px] text-gray-500 px-1">
-              <span>
-                Выбрано:{' '}
-                <strong className={selectedBatchProductIds.size >= 2 ? 'text-blue-600' : 'text-gray-700'}>
-                  {selectedBatchProductIds.size}
-                </strong>{' '}
-                из {products.length} (мин. 2, макс. 10)
-              </span>
-              {selectedBatchProductIds.size < 2 && (
-                <span className="text-amber-600 text-[10px] font-medium">
-                  Нужно минимум 2
-                </span>
+                        <span className="flex-1 min-w-0 truncate">{prod.name || 'Без названия'}</span>
+                        {!hasPhoto && <span className="shrink-0 text-[11px] opacity-70">нет фото</span>}
+                      </label>
+                    );
+                  })}
+                </div>
               )}
             </div>
 
-            {/* References preview (transferred style) */}
             <div>
-              <div className="flex items-center justify-between text-[11px] mb-1 text-gray-500">
-                <span className="font-semibold text-gray-700">
-                  Стиль с этих фото ({selectedCards.length}/5)
-                </span>
-                <span className="text-gray-400 text-[10px]">
-                  {selectedCards.length === 0 ? 'выделите фото на доске' : 'один стиль для всех'}
-                </span>
+              <div className="ofst-run mb-1">
+                <span>Стиль с этих фото {selectedCards.length}/5</span>
+                <span>один стиль для всех</span>
               </div>
-
-              {selectedCards.length === 0 ? (
-                <div className="py-2 px-3 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex items-center justify-center gap-2 text-xs text-gray-500">
-                  <ImageIcon className="w-3.5 h-3.5 text-gray-400" />
-                  <span className="text-[11px]">Выделите на доске 1–5 фото: их свет, фон и ракурс получат все продукты</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 overflow-x-auto p-1.5 bg-gray-50 border border-gray-200 rounded-xl custom-scrollbar">
-                  {selectedCards.slice(0, 5).map((card, idx) => (
-                    <div
-                      key={card.id}
-                      className="relative group shrink-0 w-10 h-10 bg-white rounded-md border border-gray-200 overflow-hidden shadow-xs"
-                    >
-                      <img
-                        src={card.src}
-                        alt={card.name || `Ref ${idx + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        {onDeselectCard && (
-                          <button
-                            type="button"
-                            onClick={() => onDeselectCard(card.id)}
-                            className="p-0.5 bg-red-500 text-white rounded-full hover:bg-red-600 cursor-pointer"
-                          >
-                            <X className="w-2.5 h-2.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {thumbs('w-12 h-12')}
             </div>
 
-            {/* Master Prompt Selector */}
-            <div className="space-y-1 bg-purple-50/60 p-2 rounded-xl border border-purple-100">
-              <div className="flex items-center justify-between text-[11px]">
-                <label
-                  htmlFor="gen-batch-master-prompt"
-                  className="flex items-center gap-1 font-semibold text-purple-900"
-                >
-                  <BookOpen className="w-3.5 h-3.5 text-purple-600" />
-                  <span>Мастер-промпт (общий для всех):</span>
-                </label>
-                {onOpenMasterPrompts && (
-                  <button
-                    type="button"
-                    onClick={onOpenMasterPrompts}
-                    className="text-purple-600 hover:text-purple-800 text-[10px] font-medium underline cursor-pointer"
-                  >
-                    Управление
-                  </button>
-                )}
-              </div>
-              <select
-                id="gen-batch-master-prompt"
-                value={selectedMasterPromptId}
-                onChange={handleMasterPromptSelect}
-                className="w-full px-2.5 py-1.5 text-xs bg-white border border-purple-200 rounded-lg text-gray-800 focus:outline-none focus:border-purple-500 transition-colors"
+            {masterSelect('gen-batch-master-prompt', 'Мастер-промпт (общий)')}
+            {promptBox('gen-batch-prompt-input', 'Общий промпт', 'Окружение, свет, фон для всех выбранных продуктов…')}
+
+            <div className="sticky bottom-0 bg-white pt-1 pb-2 flex items-center justify-between">
+              <span className="hidden sm:inline text-[11px] text-[var(--grey)]">до 10 за раз</span>
+              <button
+                type="submit"
+                id="btn-trigger-batch-generate"
+                disabled={isGenerating || selectedBatchProductIds.size < 2 || products.length === 0}
+                className="ofst-cell ofst-cell--primary !h-9 !px-4"
               >
-                <option value="">— Выберите мастер-промпт (или введите свой) —</option>
-                {masterPrompts.map((mp) => (
-                  <option key={mp.id} value={mp.id}>
-                    {mp.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Prompt Input */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <label htmlFor="gen-batch-prompt-input" className="block text-xs font-semibold text-gray-700">
-                  Общий промпт для всех продуктов
-                </label>
-                {prompt && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrompt('');
-                      setSelectedMasterPromptId('');
-                    }}
-                    className="text-[10px] text-gray-400 hover:text-red-500 cursor-pointer"
-                  >
-                    Очистить
-                  </button>
-                )}
-              </div>
-              <textarea
-                ref={textareaRef}
-                id="gen-batch-prompt-input"
-                rows={2}
-                value={prompt}
-                onChange={handlePromptChange}
-                placeholder="Общее окружение, свет, фон для всех выбранных продуктов..."
-                className="w-full p-2.5 text-xs bg-gray-50 border border-gray-300 rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-colors resize-none leading-relaxed"
-              />
-            </div>
-
-            {/* Footer & Submit Batch Button */}
-            <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-2">
-              <span className="hidden sm:inline text-[10px] text-gray-400">
-                Лимит: 10 шт. за раз
-              </span>
-
-              <div className="flex items-center gap-2 ml-auto">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
-                >
-                  Закрыть
-                </button>
-
-                <button
-                  type="submit"
-                  id="btn-trigger-batch-generate"
-                  disabled={isGenerating || selectedBatchProductIds.size < 2 || products.length === 0}
-                  className={`px-4 py-2 text-xs font-semibold rounded-lg shadow-xs flex items-center gap-1.5 transition-all cursor-pointer ${
-                    isGenerating
-                      ? 'bg-blue-400 text-white cursor-not-allowed'
-                      : selectedBatchProductIds.size < 2 || products.length === 0
-                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20'
-                  }`}
-                >
-                  {isGenerating ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>
-                        {batchProgress
-                          ? `Генерация: ${batchProgress.current} из ${batchProgress.total}...`
-                          : 'Генерация пакета...'}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <Layers className="w-3.5 h-3.5" />
-                      <span>
-                        Сгенерировать пакет{' '}
-                        {selectedBatchProductIds.size > 0 ? `(${selectedBatchProductIds.size})` : ''}
-                      </span>
-                    </>
-                  )}
-                </button>
-              </div>
+                {isGenerating
+                  ? batchProgress
+                    ? `Генерация ${batchProgress.current} из ${batchProgress.total}…`
+                    : 'Генерация…'
+                  : `Сгенерировать пачку${selectedBatchProductIds.size > 0 ? ` (${selectedBatchProductIds.size})` : ''}`}
+              </button>
             </div>
           </form>
         )}

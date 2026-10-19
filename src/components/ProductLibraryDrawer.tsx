@@ -1,5 +1,4 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { X, Plus, Trash2, Upload, Image as ImageIcon, Save, Check, PlusCircle, Crop } from 'lucide-react';
 import { ProductItem } from '../types';
 import { compressImageDataUrl, loadGlobalProducts, saveGlobalProducts } from '../utils/storage';
 import { ImageCropModal } from './ImageCropModal';
@@ -14,11 +13,11 @@ const Slot: React.FC<{ src: string; label: string; isFinal: boolean; onPick: () 
   onPick,
   onMarkFinal,
 }) => (
-  <div className={`relative w-[104px] h-[104px] border ${isFinal && src ? 'border-2 border-gray-900' : 'border-gray-200'} bg-gray-50 group/slot`}>
+  <div className={`relative w-[104px] h-[104px] bg-[var(--soft)] group/slot ${isFinal && src ? 'outline-2 outline-[var(--fg)] -outline-offset-2' : ''}`}>
     {src ? (
       <img src={src} alt={label} className="w-full h-full object-cover" draggable={false} />
     ) : (
-      <button onClick={onPick} className="w-full h-full text-[10px] text-gray-400 hover:text-gray-900 cursor-pointer" title={`Загрузить: ${label}`}>
+      <button onClick={onPick} className="w-full h-full text-[11px] text-[var(--grey)] hover:text-[var(--fg)] hover:bg-[var(--soft-2)] cursor-pointer" title={`Загрузить: ${label}`}>
         + {label}
       </button>
     )}
@@ -26,14 +25,14 @@ const Slot: React.FC<{ src: string; label: string; isFinal: boolean; onPick: () 
       <>
         <button
           onClick={onMarkFinal}
-          className={`absolute top-0 left-0 px-1 text-[11px] leading-4 cursor-pointer ${isFinal ? 'bg-yellow-300 text-gray-900' : 'bg-white/80 text-gray-400 opacity-0 group-hover/slot:opacity-100'}`}
+          className={`absolute top-0 left-0 px-1 text-[11px] leading-4 cursor-pointer ${isFinal ? 'bg-[var(--marker)] text-[var(--fg)]' : 'bg-white text-[var(--grey)] opacity-0 group-hover/slot:opacity-100'}`}
           title="Сделать финальным фото позиции"
         >
           ★
         </button>
         <button
           onClick={onPick}
-          className="absolute bottom-0 right-0 px-1 text-[10px] bg-white/80 text-gray-600 opacity-0 group-hover/slot:opacity-100 cursor-pointer"
+          className="absolute bottom-0 right-0 px-1 text-[10px] bg-white opacity-0 group-hover/slot:opacity-100 cursor-pointer"
           title="Заменить"
         >
           заменить
@@ -313,110 +312,80 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
   };
 
   return (
-    <div id="drawer-products-backdrop" className="fixed top-14 right-0 bottom-0 z-40 flex justify-end pointer-events-none">
+    <div id="drawer-products-backdrop" className="fixed top-10 right-0 bottom-0 z-40 flex justify-end pointer-events-none">
       <div
         id="drawer-products-panel"
         style={{ width: 'min(640px, 100vw)' }}
-        className="h-full bg-white shadow-2xl flex flex-col border-l border-gray-900 z-50 select-text pointer-events-auto"
+        className="h-full bg-white flex flex-col z-50 select-text pointer-events-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3.5 border-b border-gray-200 bg-gray-50/80">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-2xs">
-              <ImageIcon className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-gray-900 leading-tight">
-                Библиотека продуктов
-              </h2>
-              <p className="text-[11px] text-gray-500">Позиции проекта ({localProducts.length})</p>
-            </div>
+        <div className="px-2 pt-2">
+          <div className="ofst-run">
+            <span>Позиции проекта</span>
+            <span className="tabular-nums">{localProducts.length}</span>
           </div>
-          <button
-            onClick={onClose}
-            className="w-7 h-7 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200/60 flex items-center justify-center transition-colors cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
 
-        {/* Action Toolbar */}
-        <div className="p-3 border-b border-gray-100 bg-white">
+        {/* One row of tools */}
+        <div className="flex flex-wrap items-center px-2 pt-1 text-[13px]">
+          <button onClick={handleAddRow} className="ofst-cell -ml-2">+ Позиция</button>
           <button
-            onClick={handleAddRow}
-            className="w-full py-2 px-3 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+            onClick={() => folderBatchRef.current?.click()}
+            className="ofst-cell"
+            title="Каждое фото станет позицией, название — из имени файла. Если позиция с таким названием уже есть, к ней добавится фото."
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Добавить позицию</span>
+            Папка с фото
           </button>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <button
-              onClick={() => folderBatchRef.current?.click()}
-              className="py-1.5 px-2 text-[11px] font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg cursor-pointer"
-              title="Каждое фото станет позицией, название — из имени файла. Если позиция с таким названием уже есть, к ней добавится фото."
-            >
-              Папка с фото
+          <button
+            onClick={() => listBatchRef.current?.click()}
+            className="ofst-cell"
+            title="CSV, JSON или TXT: берётся колонка name (или первая колонка / каждая строка)"
+          >
+            Список CSV / JSON
+          </button>
+          <span className="flex-1" />
+          <span className="text-[var(--grey)] px-1">Варианты {variantCols}</span>
+          <button className="ofst-cell w-7" onClick={() => changeVariantCols(variantCols + 1)} title="Добавить колонку вариантов">
+            +
+          </button>
+          {variantCols > 0 && (
+            <button className="ofst-cell w-7" onClick={() => changeVariantCols(variantCols - 1)} title="Убрать последнюю пустую колонку">
+              −
             </button>
-            <button
-              onClick={() => listBatchRef.current?.click()}
-              className="py-1.5 px-2 text-[11px] font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg cursor-pointer"
-              title="CSV, JSON или TXT: берётся колонка name (или первая колонка / каждая строка)"
-            >
-              Список CSV / JSON
-            </button>
-          </div>
-          {batchNote && <p className="mt-2 text-[10px] text-gray-500 leading-snug">{batchNote}</p>}
+          )}
+          <button onClick={handleSave} className="ofst-cell ofst-cell--primary ml-1">
+            {saveSuccess ? 'Сохранено' : 'Сохранить'}
+          </button>
+          <button onClick={onClose} className="ofst-cell ofst-cell--muted -mr-2">Закрыть</button>
+        </div>
+        {batchNote && <p className="px-2 pt-1 text-[11px] text-[var(--grey)] leading-snug">{batchNote}</p>}
+        <input
+          ref={folderBatchRef}
+          type="file"
+          multiple
+          accept="image/*,.heic,.heif"
+          className="hidden"
+          onChange={handleBatchPhotos}
+          {...({ webkitdirectory: '' } as Record<string, string>)}
+        />
+        <input ref={listBatchRef} type="file" accept=".csv,.json,.txt,text/csv,application/json,text/plain" className="hidden" onChange={handleBatchList} />
+
+        <label className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11px] text-[var(--grey)] cursor-pointer">
           <input
-            ref={folderBatchRef}
-            type="file"
-            multiple
-            accept="image/*,.heic,.heif"
-            className="hidden"
-            onChange={handleBatchPhotos}
-            {...({ webkitdirectory: '' } as Record<string, string>)}
+            type="checkbox"
+            checked={localProducts.length > 0 && selectedIds.size === localProducts.length}
+            onChange={(e) => setSelectedIds(e.target.checked ? new Set(localProducts.map((p) => p.id)) : new Set())}
           />
-          <input ref={listBatchRef} type="file" accept=".csv,.json,.txt,text/csv,application/json,text/plain" className="hidden" onChange={handleBatchList} />
-        </div>
-
-        {/* Positions table: original | variants (one column each, + adds a column) | final = the one marked ★ */}
-        <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-gray-200 text-[11px]">
-          <label className="flex items-center gap-1.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={localProducts.length > 0 && selectedIds.size === localProducts.length}
-              onChange={(e) => setSelectedIds(e.target.checked ? new Set(localProducts.map((p) => p.id)) : new Set())}
-            />
-            <span>Выбрано {selectedIds.size}</span>
-          </label>
-          <div className="flex items-center gap-1.5">
-            <span className="text-gray-500">Колонок вариантов: {variantCols}</span>
-            <button
-              className="px-2 py-1 border border-gray-900 hover:bg-gray-900 hover:text-white cursor-pointer"
-              onClick={() => changeVariantCols(variantCols + 1)}
-              title="Добавить колонку вариантов"
-            >
-              +
-            </button>
-            {variantCols > 0 && (
-              <button
-                className="px-2 py-1 border border-gray-300 hover:border-gray-900 cursor-pointer"
-                onClick={() => changeVariantCols(variantCols - 1)}
-                title="Убрать последнюю пустую колонку"
-              >
-                −
-              </button>
-            )}
-          </div>
-        </div>
+          <span>Выбрано {selectedIds.size} — выделенные перетаскиваются на доску вместе</span>
+        </label>
         <div className="flex-1 overflow-auto">
           {localProducts.length === 0 ? (
-            <div className="py-12 text-center text-gray-400 px-4">
-              <p className="text-xs font-medium text-gray-600">Библиотека пуста</p>
-              <p className="text-[11px] text-gray-400 mt-1">Перетащи папку на доску → «Продукты», или «Папка с фото» / «Список CSV» выше</p>
+            <div className="px-2 pt-4">
+              <p className="text-[clamp(20px,1.8vw,26px)] font-medium leading-tight">Позиций пока нет</p>
+              <p className="text-[13px] text-[var(--grey)] mt-1 max-w-[46ch]">Перетащи папку на доску и выбери «Продукты», или нажми «Папка с фото» / «Список CSV / JSON» выше.</p>
             </div>
           ) : (
-            <table className="w-full border-collapse text-[11px]">
+            <table className="w-full text-[11px]" style={{ borderSpacing: '2px', borderCollapse: 'separate' }}>
               <tbody>
                 {localProducts.map((prod, idx) => {
                   const variants = Array.from({ length: variantCols }, (_, i) => prod.variants?.[i] || null);
@@ -430,10 +399,12 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                         e.dataTransfer.setData(PRODUCT_DRAG_TYPE, JSON.stringify(dragIds));
                         e.dataTransfer.effectAllowed = 'copy';
                       }}
-                      className={`border-b border-gray-200 align-top ${selectedIds.has(prod.id) ? 'bg-yellow-50' : ''}`}
+                      className={`align-top ${selectedIds.has(prod.id) ? 'bg-[var(--marker)]/25' : ''}`}
                       title="Перетащи на доску (выделенные — все вместе)"
                     >
-                      <td className="p-1 w-6">
+                      <td className="w-6 pt-0.5 text-[11px] text-[var(--grey)] tabular-nums">
+                        {String(idx + 1).padStart(2, '0')}
+
                         <input
                           type="checkbox"
                           checked={selectedIds.has(prod.id)}
@@ -447,7 +418,7 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                           }
                         />
                       </td>
-                      <td className="p-1 w-[112px]">
+                      <td className="w-[104px]">
                         <Slot
                           src={prod.photoDataUrl}
                           label="Оригинал"
@@ -457,7 +428,7 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                         />
                       </td>
                       {variants.map((v, vi) => (
-                        <td key={vi} className="p-1 w-[112px]">
+                        <td key={vi} className="w-[104px]">
                           <Slot
                             src={v || ''}
                             label={`Вариант ${vi + 1}`}
@@ -467,19 +438,19 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                           />
                         </td>
                       ))}
-                      <td className="p-1 min-w-[140px]">
+                      <td className="pl-1 min-w-[140px]">
                         <input
                           type="text"
                           value={prod.name}
                           onChange={(e) => handleNameChange(idx, e.target.value)}
-                          className="w-full text-xs font-semibold text-gray-900 bg-transparent border-b border-transparent focus:border-gray-900 focus:outline-none py-0.5"
+                          className="w-full text-[13px] font-medium !bg-transparent py-0.5 focus:!bg-[var(--soft)]"
                         />
-                        {prod.category && <div className="text-[10px] text-gray-400 mt-0.5">{prod.category}</div>}
-                        {!prod.photoDataUrl && <div className="mt-1 inline-block bg-yellow-300 px-1 text-[10px]">нет фото</div>}
-                        <div className="mt-1 flex items-center gap-2 text-[10px] text-gray-400">
-                          <button onClick={() => handleDeleteRow(idx)} className="hover:text-red-600 cursor-pointer">удалить</button>
+                        {prod.category && <div className="text-[11px] text-[var(--grey)]">{prod.category}</div>}
+                        {!prod.photoDataUrl && <div className="mt-1 text-[11px]"><mark className="bg-[var(--marker)] px-0.5">нет фото</mark></div>}
+                        <div className="mt-1 flex items-center gap-3 text-[11px] text-[var(--grey)]">
+                          <button onClick={() => handleDeleteRow(idx)} className="hover:bg-[var(--marker)] hover:text-[var(--fg)] cursor-pointer">удалить</button>
                           {prod.photoDataUrl && onAddProductToCanvas && (
-                            <button onClick={() => onAddProductToCanvas(prod)} className="hover:text-gray-900 cursor-pointer">на доску</button>
+                            <button onClick={() => onAddProductToCanvas(prod)} className="hover:text-[var(--fg)] cursor-pointer">на доску</button>
                           )}
                         </div>
                       </td>
@@ -491,30 +462,6 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
           )}
         </div>
         <input type="file" ref={variantInputRef} accept="image/*,.heic,.heif" className="hidden" onChange={handleVariantFile} />
-
-        {/* Footer: Save Button */}
-        <div className="p-3 border-t border-gray-200 bg-gray-50">
-          <button
-            onClick={handleSave}
-            className={`w-full py-2 px-3 text-xs font-medium rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer ${
-              saveSuccess
-                ? 'bg-green-600 text-white'
-                : 'bg-blue-600 hover:bg-blue-700 text-white'
-            }`}
-          >
-            {saveSuccess ? (
-              <>
-                <Check className="w-3.5 h-3.5" />
-                <span>Сохранено!</span>
-              </>
-            ) : (
-              <>
-                <Save className="w-3.5 h-3.5" />
-                <span>Сохранить</span>
-              </>
-            )}
-          </button>
-        </div>
 
         {/* Hidden File Input */}
         <input

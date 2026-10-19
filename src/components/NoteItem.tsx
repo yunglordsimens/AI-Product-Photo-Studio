@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, memo } from 'react';
 import { Note, NoteColor } from '../types';
-import { Paperclip, X, MoreVertical, Trash2, Unlink } from 'lucide-react';
 
 interface NoteItemProps {
   note: Note;
@@ -17,53 +16,24 @@ interface NoteItemProps {
   onDetach: (noteId: string) => void;
 }
 
+// OFST palette: the yellow marker, paper, greys and ink. Keys stay the same so old projects keep their notes.
 const COLOR_STYLES: Record<
   NoteColor,
   { bg: string; border: string; text: string; header: string; activeRing: string }
 > = {
-  yellow: {
-    bg: 'bg-[#fef9c3]',
-    border: 'border-[#fde047]',
-    text: 'text-[#713f12]',
-    header: 'bg-[#fef08a]',
-    activeRing: 'ring-[#eab308]',
-  },
-  pink: {
-    bg: 'bg-[#fce7f3]',
-    border: 'border-[#fbcfe8]',
-    text: 'text-[#831843]',
-    header: 'bg-[#fbcfe8]',
-    activeRing: 'ring-[#ec4899]',
-  },
-  blue: {
-    bg: 'bg-[#e0f2fe]',
-    border: 'border-[#bae6fd]',
-    text: 'text-[#0369a1]',
-    header: 'bg-[#bae6fd]',
-    activeRing: 'ring-[#0284c7]',
-  },
-  green: {
-    bg: 'bg-[#dcfce7]',
-    border: 'border-[#bbf7d0]',
-    text: 'text-[#166534]',
-    header: 'bg-[#bbf7d0]',
-    activeRing: 'ring-[#22c55e]',
-  },
-  white: {
-    bg: 'bg-[#ffffff]',
-    border: 'border-[#e5e7eb]',
-    text: 'text-[#1f2937]',
-    header: 'bg-[#f3f4f6]',
-    activeRing: 'ring-gray-400',
-  },
+  yellow: { bg: 'bg-[#ffe500]', border: '', text: 'text-[#0a0a0a]', header: '', activeRing: '' },
+  pink: { bg: 'bg-[#e4e4e2]', border: '', text: 'text-[#0a0a0a]', header: '', activeRing: '' },
+  blue: { bg: 'bg-[#0a0a0a]', border: '', text: 'text-[#f4f4f2]', header: '', activeRing: '' },
+  green: { bg: 'bg-[#cfcfcc]', border: '', text: 'text-[#0a0a0a]', header: '', activeRing: '' },
+  white: { bg: 'bg-white', border: '', text: 'text-[#0a0a0a]', header: '', activeRing: '' },
 };
 
 const COLOR_OPTIONS: { key: NoteColor; label: string; bgClass: string }[] = [
-  { key: 'yellow', label: 'Жёлтый', bgClass: 'bg-[#fde047]' },
-  { key: 'pink', label: 'Розовый', bgClass: 'bg-[#f472b6]' },
-  { key: 'blue', label: 'Голубой', bgClass: 'bg-[#38bdf8]' },
-  { key: 'green', label: 'Зелёный', bgClass: 'bg-[#4ade80]' },
-  { key: 'white', label: 'Белый', bgClass: 'bg-white border border-gray-300' },
+  { key: 'yellow', label: 'Маркер', bgClass: 'bg-[#ffe500]' },
+  { key: 'white', label: 'Белая', bgClass: 'bg-white' },
+  { key: 'pink', label: 'Серая', bgClass: 'bg-[#e4e4e2]' },
+  { key: 'green', label: 'Тёмно-серая', bgClass: 'bg-[#cfcfcc]' },
+  { key: 'blue', label: 'Чёрная', bgClass: 'bg-[#0a0a0a]' },
 ];
 
 export const NoteItem: React.FC<NoteItemProps> = memo(
@@ -177,6 +147,21 @@ export const NoteItem: React.FC<NoteItemProps> = memo(
       window.addEventListener('mouseup', handleMouseUp);
     };
 
+    const swatches = (size: string, close?: boolean) =>
+      COLOR_OPTIONS.map((c) => (
+        <button
+          key={c.key}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onUpdateColor(note.id, c.key);
+            if (close) setContextMenuPos(null);
+          }}
+          title={c.label}
+          className={`${size} cursor-pointer ${c.bgClass} ${note.color === c.key ? 'outline-1 outline-offset-1 outline-current' : ''}`}
+        />
+      ));
+
     return (
       <>
         <div
@@ -193,54 +178,17 @@ export const NoteItem: React.FC<NoteItemProps> = memo(
             zIndex: isSelected ? 40 : note.zIndex || 20,
             touchAction: 'none',
           }}
-          className={`group absolute top-0 left-0 rounded-xl shadow-lg border transition-all duration-100 select-none flex flex-col overflow-hidden pointer-events-auto cursor-grab active:cursor-grabbing ${
-            styleTheme.bg
-          } ${styleTheme.border} ${styleTheme.text} ${
-            isSelected
-              ? `ring-3 ${styleTheme.activeRing} shadow-2xl scale-[1.01]`
-              : 'hover:shadow-xl'
+          className={`group absolute top-0 left-0 select-none flex flex-col pointer-events-auto cursor-grab active:cursor-grabbing p-1.5 ${styleTheme.bg} ${styleTheme.text} ${
+            isSelected ? 'outline-1 outline-[var(--fg)] outline-offset-1' : ''
           }`}
         >
-          {/* Header Bar */}
-          <div
-            className={`px-2.5 py-1.5 flex items-center justify-between border-b border-black/5 select-none ${styleTheme.header}`}
-          >
-            {/* Attachment Indicator / Paperclip Badge */}
-            <div className="flex items-center gap-1 min-w-0">
-              {isAttached ? (
-                <div
-                  className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/10 text-[10px] font-semibold truncate"
-                  title={`Прикреплено к: ${attachedCardName || 'карточке'}`}
-                >
-                  <Paperclip className="w-3 h-3 shrink-0 text-gray-700 animate-pulse" />
-                  <span className="truncate max-w-[80px] text-gray-800">
-                    {attachedCardName || 'Прикреплено'}
-                  </span>
-                </div>
-              ) : (
-                <span className="text-[10px] font-medium opacity-60">Заметка</span>
-              )}
-            </div>
-
-            {/* Quick Color Pickers on hover / header controls */}
-            <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-              <div className="hidden group-hover:flex items-center gap-1 mr-1">
-                {COLOR_OPTIONS.map((c) => (
-                  <button
-                    key={c.key}
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onUpdateColor(note.id, c.key);
-                    }}
-                    title={c.label}
-                    className={`w-3.5 h-3.5 rounded-full cursor-pointer hover:scale-125 transition-transform ${
-                      c.bgClass
-                    } ${note.color === c.key ? 'ring-1.5 ring-gray-900 shadow-xs' : ''}`}
-                  />
-                ))}
-              </div>
-
+          {/* Head: small line, like a caption. Controls show on hover. */}
+          <div className="flex items-baseline justify-between gap-1 text-[11px] leading-4 select-none">
+            <span className="truncate opacity-60" title={isAttached ? `Прикреплена к: ${attachedCardName || 'карточке'}` : undefined}>
+              {isAttached ? `↳ ${attachedCardName || 'прикреплена'}` : 'Заметка'}
+            </span>
+            <span className="hidden group-hover:flex items-center gap-1 shrink-0">
+              {swatches('w-2.5 h-2.5')}
               {isAttached && (
                 <button
                   type="button"
@@ -248,29 +196,27 @@ export const NoteItem: React.FC<NoteItemProps> = memo(
                     e.stopPropagation();
                     onDetach(note.id);
                   }}
-                  className="p-0.5 rounded hover:bg-black/10 text-gray-700 transition-colors"
+                  className="underline cursor-pointer ml-1"
                   title="Открепить от карточки"
                 >
-                  <Unlink className="w-3 h-3" />
+                  открепить
                 </button>
               )}
-
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   onDelete(note.id);
                 }}
-                className="p-0.5 rounded hover:bg-red-500 hover:text-white text-gray-700 transition-colors"
+                className="underline cursor-pointer ml-1"
                 title="Удалить заметку"
               >
-                <X className="w-3 h-3" />
+                удалить
               </button>
-            </div>
+            </span>
           </div>
 
-          {/* Body Content / Text Area */}
-          <div className="p-2.5 flex-1 flex flex-col min-h-[70px]">
+          <div className="pt-1 flex-1 flex flex-col min-h-[60px]">
             {isEditing ? (
               <textarea
                 ref={textareaRef}
@@ -278,70 +224,37 @@ export const NoteItem: React.FC<NoteItemProps> = memo(
                 onChange={(e) => setEditText(e.target.value)}
                 onBlur={handleSaveText}
                 onKeyDown={handleKeyDown}
-                placeholder="Текст для генерации (напр. 'свет сверху', 'тёмный фон')..."
-                className="w-full h-full flex-1 bg-transparent resize-none border-none outline-none text-xs leading-relaxed font-sans placeholder:text-black/30 select-text cursor-text"
+                placeholder="Для генерации: «свет сверху», «тёмный фон»…"
+                className="w-full h-full flex-1 !bg-transparent resize-none border-none !outline-none p-0 text-[13px] leading-snug font-sans placeholder:opacity-40 placeholder:text-current select-text cursor-text"
               />
             ) : (
               <div
-                className="text-xs leading-relaxed whitespace-pre-wrap break-words flex-1 cursor-text font-sans"
+                className="text-[13px] leading-snug whitespace-pre-wrap break-words flex-1 cursor-text"
                 onClick={(e) => {
                   e.stopPropagation();
                   setIsEditing(true);
                 }}
               >
-                {note.text ? (
-                  note.text
-                ) : (
-                  <span className="italic opacity-40">
-                    Дважды кликните, чтобы написать текст заметки...
-                  </span>
-                )}
+                {note.text ? note.text : <span className="opacity-40">Пустая заметка</span>}
               </div>
             )}
           </div>
 
-          {/* Bottom info & Resize Handle */}
-          <div className="px-2 py-1 flex items-center justify-between text-[9px] opacity-40 select-none">
-            <span>{isEditing ? 'Esc — готово' : 'Учитывается при AI генерации'}</span>
-            <div
-              onMouseDown={handleResizeMouseDown}
-              className="w-3 h-3 cursor-nwse-resize flex items-center justify-center opacity-60 hover:opacity-100"
-              title="Изменить размер"
-            >
+          <div className="flex items-center justify-between text-[10px] leading-3 opacity-0 group-hover:opacity-50 select-none">
+            <span>{isEditing ? 'Esc — готово' : 'идёт в промпт'}</span>
+            <div onMouseDown={handleResizeMouseDown} className="w-3 h-3 cursor-nwse-resize text-right" title="Изменить размер">
               ◢
             </div>
           </div>
         </div>
 
-        {/* Custom Context Menu */}
         {contextMenuPos && (
           <div
             style={{ left: `${contextMenuPos.x}px`, top: `${contextMenuPos.y}px` }}
-            className="fixed z-100 bg-white border border-gray-200 rounded-xl shadow-2xl p-1.5 min-w-[160px] text-xs text-gray-800 animate-in fade-in zoom-in-95 duration-100 select-none"
+            className="fixed z-100 bg-white min-w-[160px] text-[13px] text-[var(--fg)] select-none"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-2 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
-              Цвет заметки
-            </div>
-            <div className="flex items-center gap-1.5 px-2 py-1.5">
-              {COLOR_OPTIONS.map((c) => (
-                <button
-                  key={c.key}
-                  type="button"
-                  onClick={() => {
-                    onUpdateColor(note.id, c.key);
-                    setContextMenuPos(null);
-                  }}
-                  className={`w-5 h-5 rounded-full cursor-pointer hover:scale-110 transition-transform ${
-                    c.bgClass
-                  } ${note.color === c.key ? 'ring-2 ring-blue-600 shadow-sm' : ''}`}
-                  title={c.label}
-                />
-              ))}
-            </div>
-
-            <div className="my-1 border-t border-gray-100" />
-
+            <div className="flex items-center gap-1 px-2 h-8">{swatches('w-4 h-4', true)}</div>
             {isAttached && (
               <button
                 type="button"
@@ -349,35 +262,30 @@ export const NoteItem: React.FC<NoteItemProps> = memo(
                   onDetach(note.id);
                   setContextMenuPos(null);
                 }}
-                className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-gray-100 flex items-center gap-2 text-gray-700 cursor-pointer"
+                className="w-full text-left px-2 h-7 hover:bg-[var(--soft)] cursor-pointer"
               >
-                <Unlink className="w-3.5 h-3.5 text-gray-500" />
-                <span>Открепить от карточки</span>
+                Открепить от карточки
               </button>
             )}
-
             <button
               type="button"
               onClick={() => {
                 setIsEditing(true);
                 setContextMenuPos(null);
               }}
-              className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-gray-100 flex items-center gap-2 text-gray-700 cursor-pointer"
+              className="w-full text-left px-2 h-7 hover:bg-[var(--soft)] cursor-pointer"
             >
-              <MoreVertical className="w-3.5 h-3.5 text-gray-500" />
-              <span>Редактировать текст</span>
+              Редактировать
             </button>
-
             <button
               type="button"
               onClick={() => {
                 onDelete(note.id);
                 setContextMenuPos(null);
               }}
-              className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-red-50 text-red-600 flex items-center gap-2 cursor-pointer"
+              className="w-full text-left px-2 h-7 hover:bg-[var(--marker)] cursor-pointer"
             >
-              <Trash2 className="w-3.5 h-3.5 text-red-500" />
-              <span>Удалить заметку</span>
+              Удалить
             </button>
           </div>
         )}

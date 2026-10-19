@@ -1,24 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  X,
-  Upload,
-  FolderOpen,
-  Wand2,
-  Play,
-  Square,
-  RotateCcw,
-  Check,
-  Trash2,
-  Download,
-  Image as ImageIcon,
-  Package,
-  ChevronLeft,
-  ChevronRight,
-  AlertTriangle,
-  Loader2,
-  Layers,
-  Maximize2,
-} from 'lucide-react';
 import { Card, ProductItem } from '../types';
 import { compressDataUrl } from '../utils/imageUtils';
 import { getImageModel, hasGenerationAccess } from '../utils/gemini';
@@ -457,87 +437,73 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   const [arW, arH] = catalog.aspectRatio.split(':').map(Number);
 
   return (
-    <div id="catalog-studio" className="fixed inset-0 z-50 bg-gray-50 text-gray-800 flex flex-col select-none">
-      {/* Header */}
-      <header className="h-14 shrink-0 bg-white border-b border-gray-200 px-3 sm:px-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0">
-            <Layers className="w-4 h-4" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-gray-900 truncate">Каталог · {projectName}</h2>
-            <p className="text-[11px] text-gray-500 truncate">Один эталон → одинаковые кадры для всех товаров</p>
-          </div>
+    <div id="catalog-studio" className="fixed inset-0 z-50 bg-white text-[var(--fg)] flex flex-col select-none">
+      {/* Head: running line like every part of the studio */}
+      <header className="shrink-0 px-2 pt-2">
+        <div className="ofst-run">
+          <span>Каталог · {projectName}</span>
+          <span className="hidden sm:inline">один эталон → одинаковые кадры для всех товаров</span>
+          <button onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer" aria-label="Закрыть каталог">
+            закрыть
+          </button>
         </div>
-        <button
-          onClick={onClose}
-          className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
-          title="Закрыть"
-          aria-label="Закрыть каталог"
-        >
-          <X className="w-4 h-4" />
-        </button>
       </header>
 
       {notice && (
         <div
-          className={`px-4 py-2 text-xs flex items-center justify-between gap-3 border-b ${
-            notice.kind === 'error' ? 'bg-red-50 text-red-800 border-red-200' : 'bg-blue-50 text-blue-800 border-blue-200'
+          className={`mx-2 mt-1 px-2 py-1 text-[13px] flex items-center justify-between gap-3 ${
+            notice.kind === 'error' ? 'bg-[var(--marker)]' : 'bg-[var(--soft)]'
           }`}
         >
-          <span className="flex items-center gap-2">
-            {notice.kind === 'error' && <AlertTriangle className="w-3.5 h-3.5 shrink-0" />}
-            {notice.text}
-          </span>
-          <button onClick={() => setNotice(null)} className="opacity-70 hover:opacity-100" aria-label="Скрыть">
-            <X className="w-3.5 h-3.5" />
+          <span>{notice.text}</span>
+          <button onClick={() => setNotice(null)} className="underline shrink-0" aria-label="Скрыть">
+            ок
           </button>
         </div>
       )}
 
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-auto lg:overflow-hidden">
         {/* Left: setup */}
-        <aside className="lg:w-[380px] shrink-0 bg-white border-b lg:border-b-0 lg:border-r border-gray-200 lg:overflow-y-auto p-4 space-y-5">
+        <aside className="lg:w-[360px] shrink-0 lg:overflow-y-auto custom-scrollbar p-2 space-y-4">
           {/* Step 1 */}
-          <section className="space-y-2.5">
-            <StepTitle n={1} title="Эталон стиля" hint="1–3 кадра, как должен выглядеть весь каталог" />
-            <div className="grid grid-cols-3 gap-2">
+          <section className="space-y-2">
+            <StepTitle n={1} title="Эталон стиля" hint="1–3 кадра" />
+            <div className="grid grid-cols-3 gap-0.5">
               {catalog.refs.map((ref) => (
-                <div key={ref.id} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-100 group">
+                <div key={ref.id} className="relative aspect-square overflow-hidden bg-[var(--soft)] group">
                   <img src={ref.src} alt={ref.name} className="w-full h-full object-cover" />
                   <button
                     onClick={() => update((prev) => ({ ...prev, refs: prev.refs.filter((r) => r.id !== ref.id) }))}
-                    className="absolute top-1 right-1 p-1 bg-white/90 rounded-md text-gray-600 hover:text-red-600 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                    className="absolute top-0 right-0 bg-white px-1 text-[11px] leading-4 hover:bg-[var(--marker)] hidden group-hover:block"
                     title="Убрать"
                     aria-label="Убрать эталон"
                   >
-                    <X className="w-3 h-3" />
+                    убрать
                   </button>
                 </div>
               ))}
               {catalog.refs.length < 3 && (
                 <button
                   onClick={() => refInputRef.current?.click()}
-                  className="aspect-square rounded-lg border-2 border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-400 hover:text-blue-600 flex flex-col items-center justify-center gap-1 text-[11px]"
+                  className="aspect-square bg-[var(--soft)] hover:bg-[var(--soft-2)] text-[13px]"
                 >
-                  <Upload className="w-4 h-4" />
-                  Добавить
+                  + эталон
                 </button>
               )}
             </div>
             {selectedCards.length > 0 && catalog.refs.length < 3 && (
-              <button onClick={addReferencesFromCanvas} className="text-[11px] text-blue-600 hover:underline">
+              <button onClick={addReferencesFromCanvas} className="text-[12px] underline">
                 Взять выделенные с доски ({selectedCards.length})
               </button>
             )}
 
-            <div className="grid grid-cols-2 gap-2">
-              <label className="space-y-1">
-                <span className="text-[11px] font-medium text-gray-600">Тип</span>
+            <div className="grid grid-cols-2 gap-0.5">
+              <label className="block">
+                <span className="block text-[12px] text-[var(--grey)]">Тип</span>
                 <select
                   value={catalog.category}
                   onChange={(e) => changeCategory(e.target.value as CatalogCategory)}
-                  className="w-full text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white"
+                  className="w-full h-8 px-2 text-[13px]"
                 >
                   {(Object.keys(CATEGORY_LABELS) as CatalogCategory[]).map((c) => (
                     <option key={c} value={c}>
@@ -546,12 +512,12 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                   ))}
                 </select>
               </label>
-              <label className="space-y-1">
-                <span className="text-[11px] font-medium text-gray-600">Формат кадра</span>
+              <label className="block">
+                <span className="block text-[12px] text-[var(--grey)]">Формат кадра</span>
                 <select
                   value={catalog.aspectRatio}
                   onChange={(e) => update((prev) => ({ ...prev, aspectRatio: e.target.value }))}
-                  className="w-full text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white"
+                  className="w-full h-8 px-2 text-[13px]"
                 >
                   {ASPECT_RATIOS.map((r) => (
                     <option key={r} value={r}>
@@ -562,32 +528,31 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
               </label>
             </div>
 
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-gray-600">Рецепт кадра</span>
+            <div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-[12px] text-[var(--grey)]">Рецепт кадра</span>
                 <button
                   onClick={describeStyle}
                   disabled={isDescribing || catalog.refs.length === 0}
-                  className="text-[11px] flex items-center gap-1 text-purple-700 hover:text-purple-900 disabled:text-gray-400"
+                  className="text-[12px] underline disabled:no-underline disabled:text-[var(--grey)]"
                   title="Модель сама вытащит ракурс, свет, фон из эталонов"
                 >
-                  {isDescribing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
-                  Описать стиль по эталону
+                  {isDescribing ? 'Описываю…' : 'Описать по эталону'}
                 </button>
               </div>
               <textarea
                 value={catalog.recipe}
                 onChange={(e) => update((prev) => ({ ...prev, recipe: e.target.value }))}
                 rows={7}
-                className="w-full text-[11px] font-mono leading-relaxed border border-gray-300 rounded-lg p-2 bg-gray-50 focus:bg-white focus:outline-none focus:border-blue-500 select-text"
+                className="w-full text-[12px] leading-snug p-2 select-text"
                 spellCheck={false}
               />
             </div>
 
-            <label className="block space-y-1">
-              <span className="flex justify-between text-[11px] font-medium text-gray-600">
+            <label className="block">
+              <span className="flex justify-between text-[12px] text-[var(--grey)]">
                 <span>Одинаковость кадров</span>
-                <span className="font-mono text-gray-500">температура {catalog.temperature.toFixed(2)}</span>
+                <span className="tabular-nums">t {catalog.temperature.toFixed(2)}</span>
               </span>
               <input
                 type="range"
@@ -596,135 +561,112 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                 step={0.05}
                 value={catalog.temperature}
                 onChange={(e) => update((prev) => ({ ...prev, temperature: Number(e.target.value) }))}
-                className="w-full accent-blue-600"
+                className="w-full accent-black"
               />
-              <span className="flex justify-between text-[10px] text-gray-400">
-                <span>строже, одинаковее</span>
+              <span className="flex justify-between text-[11px] text-[var(--grey)]">
+                <span>строже</span>
                 <span>свободнее</span>
               </span>
             </label>
           </section>
 
           {/* Step 2 */}
-          <section className="space-y-2.5">
-            <StepTitle n={2} title="Фото товаров" hint="Исходники клиента. Имя файла станет названием." />
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => folderInputRef.current?.click()}
-                className="flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50"
-              >
-                <FolderOpen className="w-3.5 h-3.5 text-blue-600" /> Папка
-              </button>
-              <button
-                onClick={() => filesInputRef.current?.click()}
-                className="flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50"
-              >
-                <ImageIcon className="w-3.5 h-3.5 text-blue-600" /> Файлы
-              </button>
+          <section className="space-y-1">
+            <StepTitle n={2} title="Фото товаров" hint={`${catalog.items.length} фото${selectedList.length > 0 ? ` · выбрано ${selectedList.length}` : ''}`} />
+            <div className="flex flex-wrap items-start">
+              <AddPhotosCell onFiles={() => filesInputRef.current?.click()} onFolder={() => folderInputRef.current?.click()} />
+              {products.length > 0 && (
+                <button onClick={() => setShowProductPicker(true)} className="ofst-cell">
+                  Из продуктов ({products.length})
+                </button>
+              )}
             </div>
-            {products.length > 0 && (
-              <button onClick={() => setShowProductPicker(true)} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
-                <Package className="w-3 h-3" /> Из библиотеки продуктов ({products.length})
-              </button>
-            )}
-            <p className="text-[11px] text-gray-500">
-              В каталоге: <b className="text-gray-800">{catalog.items.length}</b> фото
-              {selectedList.length > 0 && <> · выбрано {selectedList.length}</>}
-            </p>
+            <p className="text-[12px] text-[var(--grey)]">Имя файла станет названием.</p>
           </section>
 
           {/* Step 3 */}
-          <section className="space-y-2.5">
-            <StepTitle n={3} title="Прогон" hint="Сначала тест на одном фото, потом весь каталог" />
+          <section className="space-y-1">
+            <StepTitle n={3} title="Прогон" hint="сначала тест на одном" />
             {settingsChanged && catalog.versions.length > 0 && (
-              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+              <p className="text-[12px] bg-[var(--marker)] px-1">
                 Настройки изменились: следующий прогон станет версией v{catalog.versions.length + 1}, старая сохранится.
               </p>
             )}
             {isRunning ? (
-              <div className="space-y-2">
-                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div>
+                <div className="h-1 bg-[var(--soft)]">
                   <div
-                    className="h-full bg-blue-600 transition-all"
+                    className="h-full bg-[var(--fg)] transition-all"
                     style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }}
                   />
                 </div>
-                <div className="flex items-center justify-between text-[11px] text-gray-600">
-                  <span className="flex items-center gap-1.5">
-                    <Loader2 className="w-3 h-3 animate-spin" /> {progress.done} из {progress.total}
+                <div className="flex items-center justify-between text-[12px] pt-1">
+                  <span className="tabular-nums">
+                    {progress.done} из {progress.total}
                   </span>
-                  <button onClick={stop} className="flex items-center gap-1 text-red-600 hover:text-red-800 font-medium">
-                    <Square className="w-3 h-3" /> Стоп
+                  <button onClick={stop} className="ofst-cell">
+                    Стоп
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="flex flex-col items-stretch gap-0.5">
                 <button
                   onClick={() => firstForTest && run([firstForTest])}
                   disabled={!firstForTest}
-                  className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-blue-600 text-blue-700 hover:bg-blue-50 disabled:opacity-40"
+                  className="ofst-cell !h-9 bg-[var(--soft)]"
                 >
-                  <Play className="w-3.5 h-3.5" /> Тест на одном фото
+                  Тест на одном фото
                 </button>
                 <button
                   onClick={() => run(selectedList.length ? selectedList : pendingIds)}
                   disabled={catalog.items.length === 0 || (selectedList.length === 0 && pendingIds.length === 0)}
-                  className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40"
+                  className="ofst-cell ofst-cell--primary !h-9"
                 >
-                  <Play className="w-3.5 h-3.5" />
                   {selectedList.length
                     ? `Прогнать выбранные (${selectedList.length})`
                     : `Прогнать ${settingsChanged ? 'все' : 'оставшиеся'} (${pendingIds.length})`}
                 </button>
                 {errorIds.length > 0 && (
-                  <button
-                    onClick={() => run(errorIds)}
-                    className="w-full flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-red-300 text-red-700 hover:bg-red-50"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" /> Повторить ошибки ({errorIds.length})
+                  <button onClick={() => run(errorIds)} className="ofst-cell !h-9 bg-[var(--marker)]">
+                    Повторить ошибки ({errorIds.length})
                   </button>
                 )}
               </div>
             )}
-            <p className="text-[10px] text-gray-400 leading-relaxed">
-              Каждое фото — один платный запрос к модели <span className="font-mono">{getImageModel()}</span>. Модель
-              меняется в настройках.
+            <p className="text-[11px] text-[var(--grey)] leading-snug">
+              Каждое фото — один платный запрос к {getImageModel()}. Модель меняется в настройках.
             </p>
           </section>
         </aside>
 
         {/* Right: results */}
-        <main className="flex-1 min-w-0 flex flex-col lg:overflow-hidden">
-          <div className="shrink-0 px-4 py-2.5 bg-white border-b border-gray-200 flex flex-wrap items-center gap-2 justify-between">
-            <div className="flex items-center gap-1.5 flex-wrap">
+        <main className="flex-1 min-w-0 flex flex-col lg:overflow-hidden p-2 lg:pl-0">
+          <div className="shrink-0 flex flex-wrap items-center justify-between">
+            <div className="flex items-center flex-wrap">
               {catalog.versions.length === 0 ? (
-                <span className="text-xs text-gray-500">Версий пока нет: запусти тест.</span>
+                <span className="text-[13px] text-[var(--grey)]">Версий пока нет: запусти тест.</span>
               ) : (
                 catalog.versions.map((v) => (
                   <button
                     key={v.id}
                     onClick={() => applyVersionSettings(v)}
                     title={`${CATEGORY_LABELS[v.category]} · ${v.aspectRatio} · t=${v.temperature}`}
-                    className={`text-xs font-mono px-2.5 py-1 rounded-md border ${
-                      v.id === catalog.activeVersionId
-                        ? 'bg-gray-900 text-white border-gray-900'
-                        : 'bg-white text-gray-600 border-gray-300 hover:border-gray-500'
-                    }`}
+                    className={`ofst-cell ${v.id === catalog.activeVersionId ? 'is-on' : ''}`}
                   >
                     {v.label}
                   </button>
                 ))
               )}
               {activeVersion && (
-                <span className="text-[11px] text-gray-500 ml-1">
+                <span className="text-[12px] text-[var(--grey)] ml-2 tabular-nums">
                   готово {stats.done}/{catalog.items.length}
                   {stats.approved > 0 && <> · одобрено {stats.approved}</>}
-                  {stats.errors > 0 && <span className="text-red-600"> · ошибок {stats.errors}</span>}
+                  {stats.errors > 0 && <span className="text-[var(--fg)] bg-[var(--marker)] px-0.5"> · ошибок {stats.errors}</span>}
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center">
               {catalog.items.length > 0 && (
                 <button
                   onClick={() =>
@@ -732,7 +674,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                       prev.size === catalog.items.length ? new Set() : new Set(catalog.items.map((i) => i.id))
                     )
                   }
-                  className="text-[11px] text-gray-600 hover:text-gray-900 px-2 py-1"
+                  className="ofst-cell ofst-cell--muted"
                 >
                   {selectedIds.size === catalog.items.length ? 'Снять выбор' : 'Выбрать все'}
                 </button>
@@ -740,69 +682,59 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
               <button
                 onClick={exportZip}
                 disabled={!activeVersion || stats.done === 0}
-                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40"
+                className="ofst-cell"
                 title="Если есть одобренные — только они, иначе все готовые"
               >
-                <Download className="w-3.5 h-3.5" /> ZIP {stats.approved > 0 ? `(${stats.approved})` : ''}
+                ZIP {stats.approved > 0 ? `(${stats.approved})` : ''}
               </button>
             </div>
           </div>
 
           {activeVersion && (
-            <div className="shrink-0 px-4 py-1.5 text-[11px] text-amber-800 bg-amber-50 border-b border-amber-100">
+            <p className="shrink-0 text-[12px] text-[var(--grey)] py-1">
               {CATEGORY_CHECKS[activeVersion.category]} Открой фото, чтобы сравнить крупно (← → листать, A — одобрить).
-            </div>
+            </p>
           )}
 
-          <div className="flex-1 lg:overflow-y-auto p-4">
+          <div className="flex-1 lg:overflow-y-auto custom-scrollbar pt-1">
             {catalog.items.length === 0 ? (
-              <div className="h-full min-h-[240px] flex flex-col items-center justify-center text-center text-gray-400 gap-2">
-                <FolderOpen className="w-8 h-8" />
-                <p className="text-sm">Загрузи папку с фото товаров (шаг 2)</p>
+              <div className="h-full min-h-[240px] bg-[var(--soft)] flex items-center justify-center text-center text-[var(--grey)] text-[13px]">
+                Загрузи фото товаров (шаг 2)
               </div>
             ) : (
-              <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                {catalog.items.map((item) => {
+              <div className="grid gap-x-0.5 gap-y-2 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                {catalog.items.map((item, idx) => {
                   const r = resultOf(item);
                   const selected = selectedIds.has(item.id);
                   return (
-                    <div
-                      key={item.id}
-                      className={`bg-white rounded-xl border overflow-hidden ${
-                        r?.approved ? 'border-green-500 ring-1 ring-green-500' : selected ? 'border-blue-500' : 'border-gray-200'
-                      }`}
-                    >
-                      <div className="grid grid-cols-2 gap-px bg-gray-200">
+                    <div key={item.id} className={selected ? 'outline-1 outline-[var(--fg)]' : ''}>
+                      <div className="grid grid-cols-2 gap-px">
                         <Thumb src={item.original} label="до" ratio={`${arW} / ${arH}`} onOpen={() => setCompareId(item.id)} />
-                        <div className="relative bg-gray-100" style={{ aspectRatio: `${arW} / ${arH}` }}>
+                        <div className="relative bg-[var(--soft)]" style={{ aspectRatio: `${arW} / ${arH}` }}>
                           {r?.status === 'done' && r.src ? (
                             <Thumb src={r.src} label="после" ratio={`${arW} / ${arH}`} onOpen={() => setCompareId(item.id)} />
                           ) : r?.status === 'running' ? (
-                            <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-                              <Loader2 className="w-5 h-5 animate-spin" />
-                            </div>
+                            <div className="absolute inset-0 flex items-center justify-center text-[12px] text-[var(--grey)]">генерация…</div>
                           ) : r?.status === 'error' ? (
-                            <div className="absolute inset-0 p-2 flex flex-col items-center justify-center text-center gap-1">
-                              <AlertTriangle className="w-4 h-4 text-red-500" />
-                              <span className="text-[10px] text-red-700 line-clamp-4 select-text">{r.error}</span>
-                            </div>
+                            <div className="absolute inset-0 p-1 bg-[var(--marker)] text-[11px] leading-snug line-clamp-6 select-text">{r.error}</div>
                           ) : (
-                            <div className="absolute inset-0 flex items-center justify-center text-[10px] text-gray-400">ещё не прогнано</div>
+                            <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[var(--grey)]">ещё не прогнано</div>
                           )}
                         </div>
                       </div>
-                      <div className="px-2 py-1.5 flex items-center gap-1.5">
+                      <div className="flex items-center gap-1 pt-0.5 text-[12px]">
                         <input
                           type="checkbox"
                           checked={selected}
                           onChange={() => toggleSelect(item.id)}
-                          className="accent-blue-600 shrink-0"
+                          className="accent-black shrink-0 w-3 h-3"
                           aria-label="Выбрать"
                         />
+                        <span className="tabular-nums text-[var(--grey)] shrink-0">{String(idx + 1).padStart(2, '0')}</span>
                         <input
                           value={item.name}
                           onChange={(e) => renameItem(item.id, e.target.value)}
-                          className="flex-1 min-w-0 text-xs bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none select-text"
+                          className="flex-1 min-w-0 !bg-transparent px-0 select-text"
                         />
                         <IconBtn
                           title={r?.approved ? 'Снять одобрение' : 'Одобрить'}
@@ -810,13 +742,13 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                           disabled={r?.status !== 'done'}
                           active={Boolean(r?.approved)}
                         >
-                          <Check className="w-3.5 h-3.5" />
+                          {r?.approved ? '★' : '☆'}
                         </IconBtn>
                         <IconBtn title="Перегенерировать" onClick={() => run([item.id])} disabled={isRunning}>
-                          <RotateCcw className="w-3.5 h-3.5" />
+                          ещё
                         </IconBtn>
                         <IconBtn title="Убрать из каталога" onClick={() => removeItem(item.id)} disabled={isRunning}>
-                          <Trash2 className="w-3.5 h-3.5" />
+                          убрать
                         </IconBtn>
                       </div>
                     </div>
@@ -828,72 +760,52 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
         </main>
       </div>
 
-      {/* Compare view */}
+      {/* Compare view: white paper, two images side by side */}
       {compareItem && (
-        <div className="fixed inset-0 z-[60] bg-gray-950/95 flex flex-col" onClick={() => setCompareId(null)}>
-          <div className="shrink-0 px-4 py-3 flex items-center justify-between text-white" onClick={(e) => e.stopPropagation()}>
-            <span className="text-sm font-medium truncate">
+        <div className="fixed inset-0 z-[60] bg-white flex flex-col p-2 gap-1" onClick={() => setCompareId(null)}>
+          <div className="shrink-0 ofst-run" onClick={(e) => e.stopPropagation()}>
+            <span className="truncate">
               {compareIndex + 1}/{catalog.items.length} · {compareItem.name}
             </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => toggleApprove(compareItem.id)}
-                disabled={compareResult?.status !== 'done'}
-                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg disabled:opacity-40 ${
-                  compareResult?.approved ? 'bg-green-500 text-white' : 'bg-white/10 hover:bg-white/20'
-                }`}
-              >
-                <Check className="w-3.5 h-3.5" /> {compareResult?.approved ? 'Одобрено' : 'Одобрить (A)'}
+            <span className="flex gap-3">
+              <button onClick={() => toggleApprove(compareItem.id)} disabled={compareResult?.status !== 'done'} className="hover:text-[var(--fg)] disabled:opacity-40">
+                {compareResult?.approved ? '★ одобрено' : 'одобрить (A)'}
               </button>
-              <button
-                onClick={() => run([compareItem.id])}
-                disabled={isRunning}
-                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-40"
-              >
-                <RotateCcw className="w-3.5 h-3.5" /> Ещё раз
+              <button onClick={() => run([compareItem.id])} disabled={isRunning} className="hover:text-[var(--fg)] disabled:opacity-40">
+                ещё раз
               </button>
-              <button onClick={() => setCompareId(null)} className="p-1.5 rounded-lg hover:bg-white/10" aria-label="Закрыть">
-                <X className="w-4 h-4" />
+              <button onClick={() => setCompareId(null)} className="hover:text-[var(--fg)]" aria-label="Закрыть">
+                закрыть
               </button>
-            </div>
+            </span>
           </div>
-          <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 md:grid-rows-1 gap-3 p-3 pt-0 overflow-auto md:overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 gap-0.5 overflow-auto md:overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <BigImage src={compareItem.original} label="до" />
             {compareResult?.status === 'done' && compareResult.src ? (
               <BigImage src={compareResult.src} label={`после · ${activeVersion?.label}`} />
             ) : (
-              <div className="min-h-[40vh] md:min-h-0 flex items-center justify-center text-white/50 text-sm rounded-lg border border-white/10 p-4 text-center">
-                {compareResult?.status === 'running' ? <Loader2 className="w-6 h-6 animate-spin" /> : compareResult?.error || 'Ещё не прогнано'}
+              <div className="min-h-[40vh] md:min-h-0 flex items-center justify-center bg-[var(--soft)] text-[var(--grey)] text-[13px] p-4 text-center">
+                {compareResult?.status === 'running' ? 'генерация…' : compareResult?.error || 'Ещё не прогнано'}
               </div>
             )}
           </div>
-          <div className="absolute inset-y-0 left-0 flex items-center pointer-events-none">
-            {compareIndex > 0 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCompareId(catalog.items[compareIndex - 1].id);
-                }}
-                className="pointer-events-auto m-2 p-2 rounded-full bg-white/10 hover:bg-white/25 text-white"
-                aria-label="Предыдущее"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-            )}
-          </div>
-          <div className="absolute inset-y-0 right-0 flex items-center pointer-events-none">
-            {compareIndex < catalog.items.length - 1 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCompareId(catalog.items[compareIndex + 1].id);
-                }}
-                className="pointer-events-auto m-2 p-2 rounded-full bg-white/10 hover:bg-white/25 text-white"
-                aria-label="Следующее"
-              >
-                <ChevronRight className="w-5 h-5" />
-              </button>
-            )}
+          <div className="shrink-0 flex justify-between" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => compareIndex > 0 && setCompareId(catalog.items[compareIndex - 1].id)}
+              disabled={compareIndex <= 0}
+              className="ofst-cell"
+              aria-label="Предыдущее"
+            >
+              ← назад
+            </button>
+            <button
+              onClick={() => compareIndex < catalog.items.length - 1 && setCompareId(catalog.items[compareIndex + 1].id)}
+              disabled={compareIndex >= catalog.items.length - 1}
+              className="ofst-cell"
+              aria-label="Следующее"
+            >
+              дальше →
+            </button>
           </div>
         </div>
       )}
@@ -944,39 +856,54 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   );
 };
 
+/** Step head: number and title stand on the rule, hint on the right */
 function StepTitle({ n, title, hint }: { n: number; title: string; hint: string }) {
   return (
-    <div className="flex items-start gap-2">
-      <span className="w-5 h-5 shrink-0 rounded-full bg-gray-900 text-white text-[11px] font-semibold flex items-center justify-center mt-0.5">
-        {n}
+    <div className="ofst-run">
+      <span>
+        {String(n).padStart(2, '0')} {title}
       </span>
-      <div>
-        <h3 className="text-sm font-semibold text-gray-900 leading-tight">{title}</h3>
-        <p className="text-[11px] text-gray-500">{hint}</p>
-      </div>
+      <span>{hint}</span>
+    </div>
+  );
+}
+
+/** One cell for photos and folders; the browser picker takes one or the other, so it opens a two-line choice */
+function AddPhotosCell({ onFiles, onFolder }: { onFiles: () => void; onFolder: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="inline-flex flex-col items-stretch">
+      <button onClick={() => setOpen((v) => !v)} className="ofst-cell ofst-cell--primary">
+        Фото / папка
+      </button>
+      {open && (
+        <>
+          <button onClick={() => { setOpen(false); onFiles(); }} className="ofst-cell justify-start">
+            Фото
+          </button>
+          <button onClick={() => { setOpen(false); onFolder(); }} className="ofst-cell justify-start">
+            Папка
+          </button>
+        </>
+      )}
     </div>
   );
 }
 
 function Thumb({ src, label, ratio, onOpen }: { src: string; label: string; ratio: string; onOpen: () => void }) {
   return (
-    <button onClick={onOpen} className="relative block w-full bg-gray-100 group" style={{ aspectRatio: ratio }} title="Сравнить крупно">
+    <button onClick={onOpen} className="relative block w-full bg-[var(--soft)]" style={{ aspectRatio: ratio }} title="Сравнить крупно">
       <img src={src} alt={label} className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
-      <span className="absolute left-1 top-1 text-[9px] uppercase tracking-wide font-semibold bg-black/55 text-white px-1.5 py-0.5 rounded">
-        {label}
-      </span>
-      <Maximize2 className="absolute right-1.5 bottom-1.5 w-3.5 h-3.5 text-white drop-shadow opacity-0 group-hover:opacity-100" />
+      <span className="absolute left-0 top-0 text-[11px] bg-white px-1">{label}</span>
     </button>
   );
 }
 
 function BigImage({ src, label }: { src: string; label: string }) {
   return (
-    <div className="relative min-h-[40vh] md:min-h-0 h-full rounded-lg bg-black/40 overflow-hidden">
+    <div className="relative min-h-[40vh] md:min-h-0 h-full bg-[var(--soft)] overflow-hidden">
       <img src={src} alt={label} className="absolute inset-0 w-full h-full object-contain" />
-      <span className="absolute left-2 top-2 text-[10px] uppercase tracking-wide font-semibold bg-black/60 text-white px-2 py-0.5 rounded">
-        {label}
-      </span>
+      <span className="absolute left-0 top-0 text-[12px] bg-white px-1">{label}</span>
     </div>
   );
 }
@@ -1000,9 +927,7 @@ function IconBtn({
       disabled={disabled}
       title={title}
       aria-label={title}
-      className={`p-1.5 rounded-md shrink-0 disabled:opacity-30 ${
-        active ? 'bg-green-500 text-white' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
-      }`}
+      className={`px-1 h-5 shrink-0 text-[12px] disabled:opacity-30 ${active ? 'bg-[var(--marker)]' : 'text-[var(--grey)] hover:text-[var(--fg)] hover:bg-[var(--soft)]'}`}
     >
       {children}
     </button>
@@ -1020,10 +945,13 @@ function ProductPicker({
 }) {
   const [picked, setPicked] = useState<Set<string>>(new Set(products.map((p) => p.id)));
   return (
-    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" onClick={onCancel}>
-      <div className="bg-white rounded-xl max-w-lg w-full max-h-[80vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold">Добавить из библиотеки продуктов</div>
-        <div className="flex-1 overflow-y-auto p-3 grid grid-cols-3 sm:grid-cols-4 gap-2">
+    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-2" onClick={onCancel}>
+      <div className="bg-white max-w-lg w-full max-h-[80vh] flex flex-col p-2 gap-1" onClick={(e) => e.stopPropagation()}>
+        <div className="ofst-run">
+          <span>Добавить из продуктов</span>
+          <span>{picked.size} из {products.length}</span>
+        </div>
+        <div className="flex-1 overflow-y-auto custom-scrollbar grid grid-cols-3 sm:grid-cols-4 gap-x-0.5 gap-y-1">
           {products.map((p) => (
             <button
               key={p.id}
@@ -1035,23 +963,23 @@ function ProductPicker({
                   return next;
                 })
               }
-              className={`rounded-lg border overflow-hidden text-left ${picked.has(p.id) ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`}
+              className={`text-left ${picked.has(p.id) ? '' : 'opacity-40'}`}
             >
-              <div className="aspect-square bg-gray-100">
+              <div className="aspect-square bg-[var(--soft)]">
                 {p.photoDataUrl && <img src={p.photoDataUrl} alt={p.name} className="w-full h-full object-cover" />}
               </div>
-              <div className="px-1.5 py-1 text-[10px] truncate">{p.name}</div>
+              <div className="pt-0.5 text-[11px] truncate">{p.name}</div>
             </button>
           ))}
         </div>
-        <div className="px-4 py-3 border-t border-gray-100 flex justify-end gap-2">
-          <button onClick={onCancel} className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-lg">
+        <div className="flex justify-end">
+          <button onClick={onCancel} className="ofst-cell ofst-cell--muted">
             Отмена
           </button>
           <button
             onClick={() => onConfirm(products.filter((p) => picked.has(p.id)))}
             disabled={picked.size === 0}
-            className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg disabled:opacity-40"
+            className="ofst-cell ofst-cell--primary"
           >
             Добавить {picked.size}
           </button>

@@ -6,18 +6,6 @@ import { ZoomControls } from './ZoomControls';
 import { isImageFile } from '../utils/heic';
 import { FolderFile, collectFolderFiles, folderEntriesFromDrop } from '../utils/folderImport';
 import { PRODUCT_DRAG_TYPE } from '../utils/dragTypes';
-import {
-  Layers,
-  Sparkles,
-  StickyNote,
-  Link2,
-  X,
-  Ungroup,
-  Palette,
-  Copy,
-  Trash2,
-  Monitor,
-} from 'lucide-react';
 
 interface CanvasProps {
   project: Project;
@@ -37,7 +25,7 @@ interface CanvasProps {
   onAddFolder?: (files: FolderFile[], atCanvasPos?: { x: number; y: number }) => void;
   onDropProducts?: (productIds: string[], atCanvasPos: { x: number; y: number }) => void;
   onDeleteSelection?: (cardIds: string[], noteIds: string[]) => void;
-  onImportFolder?: (kind: 'products' | 'board') => void;
+  onImportFolder?: (kind: 'products' | 'board' | 'ask') => void;
   onAddNote: (note: Note) => void;
   onDeleteNote: (noteId: string) => void;
   onUpdateNoteText: (noteId: string, text: string) => void;
@@ -1264,7 +1252,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       id="main-canvas-container"
       tabIndex={0}
       style={{ touchAction: 'none' }}
-      className={`relative flex-1 w-full h-full overflow-hidden bg-gray-50/50 select-none outline-none ${
+      className={`relative flex-1 w-full h-full overflow-hidden bg-[var(--soft)] select-none outline-none ${
         isSpaceDown
           ? isPanning
             ? 'cursor-grabbing'
@@ -1290,7 +1278,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         className="absolute inset-0 pointer-events-none"
         style={{
           backgroundImage:
-            'radial-gradient(circle at 1px 1px, rgba(156, 163, 175, 0.28) 1.2px, transparent 0)',
+            'radial-gradient(circle at 1px 1px, rgba(10, 10, 10, 0.16) 1px, transparent 0)',
           backgroundSize: `${28 * zoom}px ${28 * zoom}px`,
           backgroundPosition: `${pan.x}px ${pan.y}px`,
         }}
@@ -1315,7 +1303,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               height: `${project.siteMockup.height || 640}px`,
               zIndex: 2,
             }}
-            className="absolute top-0 left-0 bg-white/90 border-2 border-teal-500/40 rounded-xl shadow-2xl overflow-hidden pointer-events-auto group/mockup select-none"
+            className="absolute top-0 left-0 bg-white overflow-hidden pointer-events-auto group/mockup select-none"
             onMouseDown={handleSiteMockupMouseDown}
           >
             <div
@@ -1330,14 +1318,10 @@ export const Canvas: React.FC<CanvasProps> = ({
               />
             </div>
 
-            {/* Mockup Toolbar Header */}
-            <div className="absolute top-2 left-2 right-2 flex items-center justify-between bg-teal-900/80 backdrop-blur-xs text-white px-2.5 py-1 rounded-lg text-xs opacity-0 group-hover/mockup:opacity-100 transition-opacity z-10">
-              <div className="flex items-center gap-1.5 font-medium text-[11px]">
-                <Monitor className="w-3.5 h-3.5 text-teal-300" />
-                <span>Фоновый макет сайта</span>
-              </div>
-
-              <div className="flex items-center gap-1">
+            {/* Mockup head: one line of text over the mockup, on hover */}
+            <div className="absolute top-0 left-0 right-0 flex items-center justify-between bg-white px-1 h-6 text-[12px] opacity-0 group-hover/mockup:opacity-100 z-10">
+              <span>Макет сайта</span>
+              <span className="flex items-center">
                 {[0.2, 0.5, 0.8, 1.0].map((op) => (
                   <button
                     key={op}
@@ -1346,16 +1330,13 @@ export const Canvas: React.FC<CanvasProps> = ({
                       e.stopPropagation();
                       if (onChangeSiteMockupOpacity) onChangeSiteMockupOpacity(op);
                     }}
-                    className={`px-1.5 py-0.5 rounded text-[10px] transition-colors cursor-pointer ${
-                      Math.abs((project.siteMockup?.opacity ?? 0.5) - op) < 0.05
-                        ? 'bg-teal-500 text-white font-bold'
-                        : 'text-white/80 hover:text-white'
+                    className={`px-1 cursor-pointer ${
+                      Math.abs((project.siteMockup?.opacity ?? 0.5) - op) < 0.05 ? 'bg-[var(--fg)] text-white' : 'hover:bg-[var(--soft)]'
                     }`}
                   >
                     {Math.round(op * 100)}%
                   </button>
                 ))}
-
                 {onDeleteSiteMockup && (
                   <button
                     type="button"
@@ -1363,30 +1344,21 @@ export const Canvas: React.FC<CanvasProps> = ({
                       e.stopPropagation();
                       onDeleteSiteMockup();
                     }}
-                    className="ml-1 hover:bg-red-500/80 p-0.5 rounded text-white/80 hover:text-white transition-colors cursor-pointer"
-                    title="Удалить фон сайта"
+                    className="ml-2 px-1 hover:bg-[var(--marker)] cursor-pointer"
+                    title="Убрать макет"
                   >
-                    <X className="w-3 h-3" />
+                    убрать
                   </button>
                 )}
-              </div>
+              </span>
             </div>
 
             {/* Resize Handle at bottom right */}
             <div
-              className="absolute bottom-0 right-0 w-6 h-6 bg-teal-500/80 hover:bg-teal-600 cursor-nwse-resize rounded-tl-lg flex items-center justify-center text-white z-10"
+              className="absolute bottom-0 right-0 w-4 h-4 bg-[var(--fg)] cursor-nwse-resize z-10"
               onMouseDown={handleSiteMockupResizeMouseDown}
-              title="Изменить размер мокапа"
-            >
-              <svg className="w-3 h-3 pointer-events-none" viewBox="0 0 10 10">
-                <path
-                  d="M 8 2 L 2 8 M 8 5 L 5 8 M 8 8 L 8 8"
-                  stroke="white"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </div>
+              title="Изменить размер макета"
+            />
           </div>
         )}
 
@@ -1413,28 +1385,25 @@ export const Canvas: React.FC<CanvasProps> = ({
                 width: `${w}px`,
                 height: `${h}px`,
                 zIndex: 4,
-                backgroundColor: `${group.color || '#6366f1'}14`,
-                borderColor: group.color || '#818cf8',
+                backgroundColor: `${group.color || '#0a0a0a'}12`,
               }}
-              className="absolute rounded-2xl border-2 border-dashed pointer-events-auto transition-all hover:border-indigo-600 hover:bg-indigo-500/15 cursor-grab active:cursor-grabbing group/grp select-none shadow-xs"
+              className="absolute pointer-events-auto cursor-grab active:cursor-grabbing group/grp select-none"
               onMouseDown={(e) => handleGroupMouseDown(e, group)}
             >
-              <div
-                style={{ backgroundColor: group.color || '#4f46e5' }}
-                className="absolute -top-7 left-2 flex items-center gap-1.5 text-white text-[11px] font-medium px-2.5 py-1 rounded-lg shadow-sm select-none">
-                <Layers className="w-3 h-3" />
+              <div className="absolute top-1 left-1 flex items-baseline gap-1.5 text-[12px] leading-4 select-none">
+                <span className="w-2 h-2 self-center" style={{ backgroundColor: group.color || '#0a0a0a' }} />
                 <span>{group.name || 'Группа'}</span>
-                <span className="opacity-75 font-mono">({memberCards.length})</span>
+                <span className="text-[var(--grey)] tabular-nums">{memberCards.length}</span>
                 {onUngroup && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       onUngroup(group.id);
                     }}
-                    className="ml-1 hover:bg-white/20 rounded-md p-0.5 transition-colors cursor-pointer"
+                    className="text-[var(--grey)] hover:text-[var(--fg)] underline opacity-0 group-hover/grp:opacity-100 cursor-pointer"
                     title="Разгруппировать"
                   >
-                    <Ungroup className="w-3 h-3" />
+                    разгруппировать
                   </button>
                 )}
               </div>
@@ -1457,7 +1426,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               markerHeight="6"
               orient="auto-start-reverse"
             >
-              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#2563eb" />
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#0a0a0a" />
             </marker>
             <marker
               id="conn-arrow-selected"
@@ -1468,7 +1437,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               markerHeight="6"
               orient="auto-start-reverse"
             >
-              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#ef4444" />
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#0a0a0a" />
             </marker>
           </defs>
 
@@ -1514,7 +1483,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                 {isConnSelected && (
                   <path
                     d={d}
-                    stroke="#fecaca"
+                    stroke="#ffe500"
                     strokeWidth={8}
                     fill="none"
                     className="pointer-events-none opacity-80"
@@ -1523,12 +1492,12 @@ export const Canvas: React.FC<CanvasProps> = ({
 
                 <path
                   d={d}
-                  stroke={isConnSelected ? '#ef4444' : conn.auto ? '#94a3b8' : '#3b82f6'}
-                  strokeWidth={isConnSelected ? 3 : conn.auto ? 1.75 : 2.5}
-                  strokeDasharray={isConnSelected ? '6,4' : conn.auto ? '2,5' : undefined}
+                  stroke={conn.auto ? '#8a8a87' : '#0a0a0a'}
+                  strokeWidth={conn.auto ? 1 : 1.5}
+                  strokeDasharray={conn.auto ? '2,4' : undefined}
                   fill="none"
                   markerEnd={isConnSelected ? 'url(#conn-arrow-selected)' : 'url(#conn-arrow)'}
-                  className="cursor-pointer transition-all hover:stroke-blue-500"
+                  className="cursor-pointer"
                   onClick={(e) => {
                     e.stopPropagation();
                     if (onSelectConnection) onSelectConnection(conn.id);
@@ -1537,8 +1506,8 @@ export const Canvas: React.FC<CanvasProps> = ({
                   }}
                 />
 
-                <circle cx={x1} cy={y1} r={4.5} fill={isConnSelected ? '#ef4444' : '#2563eb'} />
-                <circle cx={x2} cy={y2} r={4.5} fill={isConnSelected ? '#ef4444' : '#2563eb'} />
+                <circle cx={x1} cy={y1} r={2.5} fill="#0a0a0a" />
+                <circle cx={x2} cy={y2} r={2.5} fill="#0a0a0a" />
 
                 <g
                   transform={`translate(${midX}, ${midY})`}
@@ -1551,9 +1520,9 @@ export const Canvas: React.FC<CanvasProps> = ({
                     if (onSelectConnection) onSelectConnection(null);
                   }}
                 >
-                  <circle r={10} fill="#ef4444" className="shadow-md hover:fill-red-600" />
-                  <text textAnchor="middle" dy="3.5" fill="#ffffff" fontSize="10" fontWeight="bold">
-                    ✕
+                  <rect x={-26} y={-9} width={52} height={18} fill="#ffffff" />
+                  <text textAnchor="middle" dy="4" fill="#0a0a0a" fontSize="11">
+                    удалить
                   </text>
                 </g>
               </g>
@@ -1604,7 +1573,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         <div
           id="canvas-context-menu"
           style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
-          className="fixed z-50 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-gray-200 py-1.5 min-w-[190px] text-xs animate-in zoom-in-95 duration-100"
+          className="fixed z-50 bg-white min-w-[200px] text-[13px] text-[var(--fg)]"
           onClick={(e) => e.stopPropagation()}
         >
           {onImportFolder && (
@@ -1614,7 +1583,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                   onImportFolder('products');
                   setContextMenu((prev) => ({ ...prev, visible: false }));
                 }}
-                className="w-full px-3 py-2 text-left text-gray-700 hover:bg-gray-100 flex items-center gap-2 font-medium cursor-pointer"
+                className="w-full px-2 h-7 text-left hover:bg-[var(--soft)] flex items-center cursor-pointer"
               >
                 <span>Импорт продуктов (папка)</span>
               </button>
@@ -1623,7 +1592,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                   onImportFolder('board');
                   setContextMenu((prev) => ({ ...prev, visible: false }));
                 }}
-                className="w-full px-3 py-2 text-left text-gray-700 hover:bg-gray-100 flex items-center gap-2 font-medium cursor-pointer border-b border-gray-100"
+                className="w-full px-2 h-7 text-left hover:bg-[var(--soft)] flex items-center cursor-pointer"
               >
                 <span>Папка фото на доску</span>
               </button>
@@ -1635,9 +1604,8 @@ export const Canvas: React.FC<CanvasProps> = ({
                 onGroupSelected();
                 setContextMenu((prev) => ({ ...prev, visible: false }));
               }}
-              className="w-full px-3 py-2 text-left text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2 font-medium cursor-pointer"
+              className="w-full px-2 h-7 text-left hover:bg-[var(--soft)] flex items-center cursor-pointer"
             >
-              <Layers className="w-3.5 h-3.5 text-indigo-600" />
               <span>Сгруппировать ({selectedCardIds.size})</span>
             </button>
           )}
@@ -1648,9 +1616,8 @@ export const Canvas: React.FC<CanvasProps> = ({
                 onUngroup(activeGroup.id);
                 setContextMenu((prev) => ({ ...prev, visible: false }));
               }}
-              className="w-full px-3 py-2 text-left text-gray-700 hover:bg-orange-50 hover:text-orange-700 flex items-center gap-2 font-medium cursor-pointer"
+              className="w-full px-2 h-7 text-left hover:bg-[var(--soft)] flex items-center cursor-pointer"
             >
-              <Ungroup className="w-3.5 h-3.5 text-orange-600" />
               <span>Разгруппировать</span>
             </button>
           )}
@@ -1661,23 +1628,17 @@ export const Canvas: React.FC<CanvasProps> = ({
                 onAnalyzeStyle();
                 setContextMenu((prev) => ({ ...prev, visible: false }));
               }}
-              className="w-full px-3 py-2 text-left text-gray-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2 font-medium cursor-pointer"
+              className="w-full px-2 h-7 text-left hover:bg-[var(--soft)] flex items-center cursor-pointer"
             >
-              <Palette className="w-3.5 h-3.5 text-purple-600" />
-              <span>Описать стиль (теги света, фона, ракурса)</span>
+              <span>Описать стиль выделенных</span>
             </button>
           )}
 
           {contextMenu.isMockup && (
             <>
-              <div className="px-3 py-1.5 text-[11px] font-semibold text-gray-400 border-b border-gray-100 flex items-center gap-1.5">
-                <Monitor className="w-3.5 h-3.5 text-teal-600" />
-                <span>Мокап сайта</span>
-              </div>
-
-              <div className="px-3 py-2 text-xs text-gray-700">
-                <div className="text-[11px] font-medium text-gray-500 mb-1.5">Прозрачность фона:</div>
-                <div className="grid grid-cols-4 gap-1">
+              <div className="px-2 pt-1 text-[12px] text-[var(--grey)]">Макет сайта, прозрачность</div>
+              <div className="px-2 pb-1">
+                <div className="flex">
                   {[0.2, 0.5, 0.8, 1.0].map((op) => (
                     <button
                       key={op}
@@ -1686,11 +1647,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                         if (onChangeSiteMockupOpacity) onChangeSiteMockupOpacity(op);
                         setContextMenu((prev) => ({ ...prev, visible: false }));
                       }}
-                      className={`px-1.5 py-1 text-center rounded border text-xs font-medium cursor-pointer transition-colors ${
-                        Math.abs((project.siteMockup?.opacity ?? 0.5) - op) < 0.05
-                          ? 'bg-teal-50 border-teal-400 text-teal-700 font-bold'
-                          : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
-                      }`}
+                      className={`ofst-cell !h-6 ${Math.abs((project.siteMockup?.opacity ?? 0.5) - op) < 0.05 ? 'is-on' : ''}`}
                     >
                       {Math.round(op * 100)}%
                     </button>
@@ -1704,10 +1661,9 @@ export const Canvas: React.FC<CanvasProps> = ({
                     onDeleteSiteMockup();
                     setContextMenu((prev) => ({ ...prev, visible: false }));
                   }}
-                  className="w-full px-3 py-2 text-left text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium cursor-pointer border-t border-gray-100 mt-1 pt-1.5"
+                  className="w-full px-2 h-7 text-left hover:bg-[var(--marker)] flex items-center cursor-pointer"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Удалить фон (мокап)</span>
+                      <span>Убрать макет</span>
                 </button>
               )}
             </>
@@ -1721,10 +1677,9 @@ export const Canvas: React.FC<CanvasProps> = ({
                   if (card) onDuplicateCard(card);
                   setContextMenu((prev) => ({ ...prev, visible: false }));
                 }}
-                className="w-full px-3 py-2 text-left text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2 font-medium cursor-pointer"
+                className="w-full px-2 h-7 text-left hover:bg-[var(--soft)] flex items-center cursor-pointer"
               >
-                <Copy className="w-3.5 h-3.5 text-blue-600" />
-                <span>Дублировать карточку</span>
+                  <span>Копия</span>
               </button>
 
               <button
@@ -1732,10 +1687,9 @@ export const Canvas: React.FC<CanvasProps> = ({
                   if (contextMenu.cardId) onDeleteCard(contextMenu.cardId);
                   setContextMenu((prev) => ({ ...prev, visible: false }));
                 }}
-                className="w-full px-3 py-2 text-left text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium cursor-pointer border-t border-gray-100 mt-1 pt-1.5"
+                className="w-full px-2 h-7 text-left hover:bg-[var(--marker)] flex items-center cursor-pointer"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Удалить карточку</span>
+                  <span>Удалить</span>
               </button>
             </>
           )}
@@ -1744,15 +1698,12 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       {/* Connection Mode Active Helper Banner */}
       {isConnectionMode && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-blue-600/95 text-white px-4 py-2 rounded-full shadow-lg backdrop-blur-sm flex items-center gap-3 text-xs animate-in fade-in slide-in-from-top-2 duration-200">
-          <div className="flex items-center gap-2">
-            <Link2 className="w-4 h-4 animate-pulse" />
-            <span className="font-medium">
-              {connectingSourceCardId
-                ? 'Начальная карточка выбрана. Теперь кликните целевую карточку.'
-                : 'Режим связей: кликните первую карточку для соединения'}
-            </span>
-          </div>
+        <div className="absolute top-0 inset-x-0 z-40 bg-[var(--marker)] px-2 h-7 flex items-center justify-between text-[13px]">
+          <span>
+            {connectingSourceCardId
+              ? 'Связи: теперь кликни второе фото'
+              : 'Связи: кликни первое фото'}
+          </span>
           <button
             onClick={() => {
               if (connectingSourceCardId && onSetConnectingSourceCardId) {
@@ -1762,10 +1713,10 @@ export const Canvas: React.FC<CanvasProps> = ({
                 onToggleConnectionMode();
               }
             }}
-            className="w-5 h-5 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white transition-colors cursor-pointer"
+            className="underline cursor-pointer"
             title="Выйти из режима связей (Esc)"
           >
-            <X className="w-3.5 h-3.5" />
+            готово
           </button>
         </div>
       )}
@@ -1780,91 +1731,49 @@ export const Canvas: React.FC<CanvasProps> = ({
             width: `${marqueeStyle.width}px`,
             height: `${marqueeStyle.height}px`,
           }}
-          className="absolute border-2 border-blue-500/40 bg-blue-500/10 pointer-events-none rounded-sm z-40"
-        >
-          <div className="absolute bottom-1 right-2 text-blue-600 text-[10px] font-bold uppercase tracking-wider">
-            Выделение
-          </div>
-        </div>
+          className="absolute border border-[var(--fg)] bg-[var(--marker)]/10 pointer-events-none z-40"
+        />
       )}
 
       {/* Drop Target Glow Overlay */}
       {isDragOver && (
         <div
           id="canvas-dropzone-overlay"
-          className="absolute inset-4 rounded-2xl border-2 border-dashed border-blue-500 bg-blue-500/10 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 z-50 pointer-events-none transition-all"
+          className="absolute inset-0 border-2 border-[var(--fg)] bg-white/60 flex items-center justify-center z-50 pointer-events-none"
         >
-          <div className="w-14 h-14 rounded-2xl bg-blue-600 border border-blue-400 flex items-center justify-center shadow-lg text-white">
-            <Layers className="w-7 h-7 animate-bounce" />
-          </div>
-          <div className="text-center">
-            <h3 className="text-base font-semibold text-gray-900">
-              Отпустите изображения на канвас
-            </h3>
-            <p className="text-xs text-blue-600 mt-0.5 font-medium">
-              Карточки создадутся в точке сброса
-            </p>
-          </div>
+          <p className="text-[clamp(28px,3.6vw,56px)] font-medium leading-none tracking-[-.025em]">Отпусти — фото встанут сюда</p>
         </div>
       )}
 
-      {/* Empty State Banner */}
+      {/* Empty board: plain text, like a catalogue page before the objects */}
       {(!project.cards || project.cards.length === 0) &&
         (!project.notes || project.notes.length === 0) && (
-          <div
-            id="canvas-empty-state"
-            className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center pointer-events-none"
-          >
-            <div className="max-w-md p-6 rounded-2xl bg-white/95 backdrop-blur-md border border-gray-200 shadow-xl space-y-3 pointer-events-auto">
-              <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center mx-auto text-blue-600">
-                <Sparkles className="w-6 h-6" />
-              </div>
-              <div>
-                <h2 className="text-sm font-semibold text-gray-900">
-                  Канвас готов к работе
-                </h2>
-                <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                  Перетащите фото товаров на канвас или нажмите кнопку <b>«+ Фото»</b> сверху.
-                </p>
-              </div>
-              <div className="pt-1 flex justify-center gap-2">
-                <button
-                  onClick={() => {
-                    const input = document.getElementById('hidden-global-file-input');
-                    input?.click();
-                  }}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium shadow-sm transition-colors cursor-pointer"
-                >
-                  Выбрать файлы
-                </button>
-              </div>
+          <div id="canvas-empty-state" className="absolute inset-x-0 top-0 p-2 pointer-events-none">
+            <div className="ofst-run max-w-[1100px]">
+              <span>{project.name}</span>
+              <span>пустая доска</span>
             </div>
+            <p className="mt-3 max-w-[18ch] text-[var(--fg)] text-[clamp(30px,3.6vw,56px)] font-medium leading-none tracking-[-.025em]">
+              Перетащи сюда фото или папку
+            </p>
+            <div className="mt-4 pointer-events-auto">
+              <EmptyAddButton
+                onFiles={() => document.getElementById('hidden-global-file-input')?.click()}
+                onFolder={onImportFolder ? () => onImportFolder('ask') : undefined}
+              />
+            </div>
+            <p className="mt-3 max-w-[52ch] text-[13px] text-[var(--grey)]">
+              Папку студия спросит: это продукты (уйдут в позиции) или фото на доску. Каждая подпапка станет своей группой.
+            </p>
           </div>
         )}
 
-      {/* Bottom Floating Toolbar: Hints (Desktop) */}
-      <div className="absolute bottom-6 left-6 hidden lg:flex items-center gap-4 bg-white/80 backdrop-blur-sm border border-white/60 px-4 py-2 rounded-full shadow-sm text-[11px] text-gray-500 z-30 pointer-events-none">
-        <span className="flex items-center">
-          <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-200 rounded shadow-sm text-gray-700 font-sans mr-1.5 text-[10px]">
-            Двойной клик
-          </kbd>{' '}
-          Заметка
-        </span>
-        <span className="text-gray-300">•</span>
-        <span className="flex items-center">
-          <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-200 rounded shadow-sm text-gray-700 font-sans mr-1.5 text-[10px]">
-            Space
-          </kbd>{' '}
-          Панорама
-        </span>
-        <span className="text-gray-300">•</span>
-        <span className="flex items-center">
-          <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-200 rounded shadow-sm text-gray-700 font-sans mr-1.5 text-[10px]">
-            Ctrl + Колесо
-          </kbd>{' '}
-          Зум
-        </span>
-      </div>
+      {/* Hints: one grey line, no box */}
+      <p className="absolute bottom-2 left-2 hidden lg:flex gap-4 text-[11px] text-[var(--grey)] z-30 pointer-events-none">
+        <span>Двойной клик — заметка</span>
+        <span>Space — панорама</span>
+        <span>Ctrl + колесо — зум</span>
+      </p>
 
       {/* Floating Zoom Controller */}
       <ZoomControls
@@ -1874,6 +1783,25 @@ export const Canvas: React.FC<CanvasProps> = ({
         onResetZoom={handleResetZoom}
         onFitCards={handleFitCards}
       />
+    </div>
+  );
+};
+
+/** One button for photos and folders. The browser picker can't take both at once, so it opens a two-line choice. */
+const EmptyAddButton: React.FC<{ onFiles: () => void; onFolder?: () => void }> = ({ onFiles, onFolder }) => {
+  const [open, setOpen] = React.useState(false);
+  if (!onFolder) {
+    return <button className="ofst-cell ofst-cell--primary" onClick={onFiles}>Фото</button>;
+  }
+  return (
+    <div className="relative inline-flex flex-col items-start">
+      <button className="ofst-cell ofst-cell--primary" onClick={() => setOpen((v) => !v)}>Фото / папка</button>
+      {open && (
+        <div className="flex flex-col bg-white min-w-full">
+          <button className="ofst-cell justify-start" onClick={() => { setOpen(false); onFiles(); }}>Фото</button>
+          <button className="ofst-cell justify-start" onClick={() => { setOpen(false); onFolder(); }}>Папка</button>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,18 +1,4 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import {
-  X,
-  Check,
-  RotateCw,
-  Maximize2,
-  Square,
-  RectangleHorizontal,
-  RectangleVertical,
-  Crop,
-  Layers,
-  Sparkles,
-  FastForward,
-  CheckCheck,
-} from 'lucide-react';
 
 export type CropAspectRatio = '1:1' | '4:3' | '3:4' | '4:5' | '16:9' | '9:16' | 'free';
 
@@ -427,142 +413,61 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
   return (
     <div
       id="image-crop-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 select-none animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 select-none"
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
       <div
         id="image-crop-modal-card"
-        className="bg-gray-900 border border-gray-800 text-white rounded-2xl w-full max-w-4xl max-h-[96vh] sm:max-h-[92vh] flex flex-col shadow-2xl overflow-hidden"
+        className="bg-white text-[var(--fg)] w-full max-w-4xl max-h-[96vh] flex flex-col overflow-hidden p-2 gap-2"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-3 sm:px-6 py-3 border-b border-gray-800 shrink-0">
-          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center border border-blue-500/30 shrink-0">
-              <Crop size={18} />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-sm sm:text-base text-gray-100 truncate">
-                  Кадрирование фото
-                </h3>
-                {isBatch && (
-                  <span className="text-xs bg-blue-500/20 text-blue-300 font-medium px-2 py-0.5 rounded-full border border-blue-500/30 shrink-0">
-                    {queueInfo.current} из {queueInfo.total}
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] sm:text-xs text-gray-400 truncate max-w-[200px] sm:max-w-md">
-                {imageName || queueInfo?.fileName || 'Настройте область обрезки'}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            {isBatch && onSkipAllAndImportOriginals && (
-              <button
-                onClick={onSkipAllAndImportOriginals}
-                className="hidden sm:flex items-center gap-1 px-2.5 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg transition-colors border border-gray-700 cursor-pointer"
-                title="Импортировать все фото без обрезки"
-              >
-                <FastForward size={13} className="text-amber-400" />
-                <span>Импорт без обрезки</span>
-              </button>
-            )}
-
-            <button
-              onClick={onCancel}
-              className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-gray-800 transition-colors"
-              title="Отмена"
-            >
-              <X size={20} />
-            </button>
-          </div>
+        {/* Running line: what, which one, file */}
+        <div className="ofst-run shrink-0">
+          <span>Кадрирование{isBatch ? ` · ${queueInfo.current} из ${queueInfo.total}` : ''}</span>
+          <span className="truncate max-w-[60%]">{imageName || queueInfo?.fileName || 'выбери область'}</span>
         </div>
 
-        {/* Batch Quick Action Bar (if multiple photos in queue) */}
-        {isBatch && (
-          <div className="px-3 sm:px-6 py-2 bg-blue-950/40 border-b border-blue-900/30 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="text-blue-300 flex items-center gap-1.5 font-medium">
-              <Sparkles size={14} className="text-blue-400" />
-              <span>Пакетный режим ({queueInfo.total} фото):</span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {onApplyToAllRemaining && (
-                <button
-                  onClick={() => onApplyToAllRemaining(aspectRatio)}
-                  className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors shadow-xs cursor-pointer"
-                  title="Применить текущую пропорцию ко всем оставшимся фото"
-                >
-                  <CheckCheck size={14} />
-                  <span>Применить ко всем ({remainingCount})</span>
-                </button>
-              )}
-
-              {onSkipAllAndImportOriginals && (
-                <button
-                  onClick={onSkipAllAndImportOriginals}
-                  className="sm:hidden flex items-center gap-1 px-2 py-1 bg-gray-800 text-amber-300 rounded-lg font-medium transition-colors"
-                >
-                  <FastForward size={13} />
-                  <span>Без кропа</span>
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Aspect Ratio Toolbar & Controls */}
-        <div className="px-3 sm:px-6 py-2 bg-gray-950/70 border-b border-gray-800/80 flex flex-wrap items-center justify-between gap-2 shrink-0">
-          {/* Aspect ratio buttons */}
-          <div className="flex items-center gap-1 bg-gray-900 p-0.5 sm:p-1 rounded-xl border border-gray-800">
-            {CROP_PRESETS.map((preset) => {
-              const r = cropRatioValue(preset.id) || 1;
-              const Icon = r > 1 ? RectangleHorizontal : r < 1 ? RectangleVertical : Square;
-              return (
-                <button
-                  key={preset.id}
-                  onClick={() => handleSelectAspectRatio(preset.id)}
-                  className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
-                    aspectRatio === preset.id
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
-                  }`}
-                  title={preset.title}
-                >
-                  <Icon size={13} />
-                  <span>{preset.id}</span>
-                </button>
-              );
-            })}
-
+        {/* One row of cells: ratios, rotate, batch actions, close */}
+        <div className="flex flex-wrap items-center gap-0 shrink-0">
+          {CROP_PRESETS.map((preset) => (
             <button
-              onClick={() => handleSelectAspectRatio('free')}
-              className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
-                aspectRatio === 'free'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
-              }`}
-              title="Свободные пропорции"
+              key={preset.id}
+              onClick={() => handleSelectAspectRatio(preset.id)}
+              className={`ofst-cell ${aspectRatio === preset.id ? 'is-on' : ''}`}
+              title={preset.title}
             >
-              <Maximize2 size={13} />
-              <span>Свободно</span>
+              {preset.id}
             </button>
-          </div>
-
-          {/* Rotate tool */}
-          <div className="flex items-center gap-2">
+          ))}
+          <button
+            onClick={() => handleSelectAspectRatio('free')}
+            className={`ofst-cell ${aspectRatio === 'free' ? 'is-on' : ''}`}
+            title="Свободные пропорции"
+          >
+            Свободно
+          </button>
+          <button onClick={handleRotate} className="ofst-cell" title="Повернуть на 90°">
+            Повернуть
+          </button>
+          <span className="flex-1" />
+          {isBatch && onApplyToAllRemaining && (
             <button
-              onClick={handleRotate}
-              className="flex items-center gap-1.5 px-3 py-1 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-300 hover:text-white rounded-xl text-xs font-medium transition-colors cursor-pointer"
-              title="Повернуть на 90°"
+              onClick={() => onApplyToAllRemaining(aspectRatio)}
+              className="ofst-cell"
+              title="Применить текущую пропорцию ко всем оставшимся фото"
             >
-              <RotateCw size={14} />
-              <span>Повернуть</span>
+              {aspectRatio === 'free' ? 'Так же' : aspectRatio} ко всем ({remainingCount})
             </button>
-          </div>
+          )}
+          {isBatch && onSkipAllAndImportOriginals && (
+            <button onClick={onSkipAllAndImportOriginals} className="ofst-cell ofst-cell--muted" title="Импортировать все фото без обрезки">
+              Все без обрезки
+            </button>
+          )}
+          <button onClick={onCancel} className="ofst-cell ofst-cell--muted" title="Отмена">
+            Закрыть
+          </button>
         </div>
 
         {/* Main Crop Viewport */}
@@ -570,7 +475,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
           ref={containerRef}
           id="crop-viewport-container"
           style={{ touchAction: 'none' }}
-          className="relative flex-1 min-h-[260px] max-h-[58vh] sm:max-h-[66vh] bg-black/95 flex items-center justify-center overflow-hidden p-2 sm:p-4 select-none"
+          className="relative flex-1 min-h-[260px] max-h-[62vh] sm:max-h-[70vh] bg-[var(--soft)] flex items-center justify-center overflow-hidden p-2 select-none"
         >
           {imageSrc && imageLayout.width > 0 && (
             <div
@@ -580,7 +485,6 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
                 height: imageLayout.height,
               }}
             >
-              {/* Displayed Image */}
               <img
                 ref={imageRef}
                 src={imageSrc}
@@ -592,48 +496,15 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
                 draggable={false}
               />
 
-              {/* Shading outside crop box */}
-              <div
-                className="absolute bg-black/60 pointer-events-none"
-                style={{
-                  left: 0,
-                  top: 0,
-                  width: '100%',
-                  height: cropBox.y,
-                }}
-              />
-              <div
-                className="absolute bg-black/60 pointer-events-none"
-                style={{
-                  left: 0,
-                  top: cropBox.y + cropBox.height,
-                  width: '100%',
-                  height: Math.max(0, imageLayout.height - (cropBox.y + cropBox.height)),
-                }}
-              />
-              <div
-                className="absolute bg-black/60 pointer-events-none"
-                style={{
-                  left: 0,
-                  top: cropBox.y,
-                  width: cropBox.x,
-                  height: cropBox.height,
-                }}
-              />
-              <div
-                className="absolute bg-black/60 pointer-events-none"
-                style={{
-                  left: cropBox.x + cropBox.width,
-                  top: cropBox.y,
-                  width: Math.max(0, imageLayout.width - (cropBox.x + cropBox.width)),
-                  height: cropBox.height,
-                }}
-              />
+              {/* Paper over what gets cut away */}
+              <div className="absolute bg-white/70 pointer-events-none" style={{ left: 0, top: 0, width: '100%', height: cropBox.y }} />
+              <div className="absolute bg-white/70 pointer-events-none" style={{ left: 0, top: cropBox.y + cropBox.height, width: '100%', height: Math.max(0, imageLayout.height - (cropBox.y + cropBox.height)) }} />
+              <div className="absolute bg-white/70 pointer-events-none" style={{ left: 0, top: cropBox.y, width: cropBox.x, height: cropBox.height }} />
+              <div className="absolute bg-white/70 pointer-events-none" style={{ left: cropBox.x + cropBox.width, top: cropBox.y, width: Math.max(0, imageLayout.width - (cropBox.x + cropBox.width)), height: cropBox.height }} />
 
-              {/* Interactive Crop Box */}
               <div
                 id="active-crop-box"
-                className="absolute border-2 border-blue-400 cursor-move shadow-2xl touch-none group"
+                className="absolute border border-[var(--fg)] cursor-move touch-none group"
                 style={{
                   left: cropBox.x,
                   top: cropBox.y,
@@ -642,52 +513,41 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
                 }}
                 onPointerDown={(e) => handlePointerDown(e, 'move')}
               >
-                {/* 3x3 Grid */}
-                <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none opacity-40 group-hover:opacity-75 transition-opacity">
-                  <div className="border-r border-b border-white/50" />
-                  <div className="border-r border-b border-white/50" />
-                  <div className="border-b border-white/50" />
-                  <div className="border-r border-b border-white/50" />
-                  <div className="border-r border-b border-white/50" />
-                  <div className="border-b border-white/50" />
-                  <div className="border-r border-white/50" />
-                  <div className="border-r border-white/50" />
-                  <div />
+                <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none opacity-0 group-hover:opacity-60 transition-opacity">
+                  {Array.from({ length: 9 }).map((_, i) => (
+                    <div key={i} className={`${i % 3 < 2 ? 'border-r' : ''} ${i < 6 ? 'border-b' : ''} border-white`} />
+                  ))}
                 </div>
-
-                {/* 4 Corner Resize Handles */}
                 <div
-                  className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-blue-500 rounded-xs cursor-nwse-resize shadow-md"
+                  className="absolute -top-1 -left-1 w-2 h-2 cursor-nwse-resize bg-white border border-[var(--fg)]"
                   onPointerDown={(e) => handlePointerDown(e, 'nw')}
                 />
                 <div
-                  className="absolute -top-2 -right-2 w-4 h-4 bg-white border-2 border-blue-500 rounded-xs cursor-nesw-resize shadow-md"
+                  className="absolute -top-1 -right-1 w-2 h-2 cursor-nesw-resize bg-white border border-[var(--fg)]"
                   onPointerDown={(e) => handlePointerDown(e, 'ne')}
                 />
                 <div
-                  className="absolute -bottom-2 -left-2 w-4 h-4 bg-white border-2 border-blue-500 rounded-xs cursor-nesw-resize shadow-md"
+                  className="absolute -bottom-1 -left-1 w-2 h-2 cursor-nesw-resize bg-white border border-[var(--fg)]"
                   onPointerDown={(e) => handlePointerDown(e, 'sw')}
                 />
                 <div
-                  className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-blue-500 rounded-xs cursor-nwse-resize shadow-md"
+                  className="absolute -bottom-1 -right-1 w-2 h-2 cursor-nwse-resize bg-white border border-[var(--fg)]"
                   onPointerDown={(e) => handlePointerDown(e, 'se')}
                 />
-
-                {/* 4 Edge Resize Handles */}
                 <div
-                  className="absolute top-1/2 -left-2 -translate-y-1/2 w-3.5 h-6 bg-white border border-blue-500 rounded-xs cursor-ew-resize opacity-80"
+                  className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-5 cursor-ew-resize bg-white border border-[var(--fg)]"
                   onPointerDown={(e) => handlePointerDown(e, 'w')}
                 />
                 <div
-                  className="absolute top-1/2 -right-2 -translate-y-1/2 w-3.5 h-6 bg-white border border-blue-500 rounded-xs cursor-ew-resize opacity-80"
+                  className="absolute top-1/2 -right-1 -translate-y-1/2 w-2 h-5 cursor-ew-resize bg-white border border-[var(--fg)]"
                   onPointerDown={(e) => handlePointerDown(e, 'e')}
                 />
                 <div
-                  className="absolute -top-2 left-1/2 -translate-x-1/2 w-6 h-3.5 bg-white border border-blue-500 rounded-xs cursor-ns-resize opacity-80"
+                  className="absolute -top-1 left-1/2 -translate-x-1/2 w-5 h-2 cursor-ns-resize bg-white border border-[var(--fg)]"
                   onPointerDown={(e) => handlePointerDown(e, 'n')}
                 />
                 <div
-                  className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-6 h-3.5 bg-white border border-blue-500 rounded-xs cursor-ns-resize opacity-80"
+                  className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-5 h-2 cursor-ns-resize bg-white border border-[var(--fg)]"
                   onPointerDown={(e) => handlePointerDown(e, 's')}
                 />
               </div>
@@ -695,39 +555,23 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
           )}
         </div>
 
-        {/* Footer Actions */}
-        <div className="flex items-center justify-between px-3 sm:px-6 py-3 border-t border-gray-800 bg-gray-950/90 shrink-0">
-          <div className="flex items-center gap-2">
+        {/* Footer: skip / cancel left, save right */}
+        <div className="flex items-center justify-between shrink-0">
+          <div className="flex items-center">
             {isBatch && onSkipCurrent && (
-              <button
-                onClick={onSkipCurrent}
-                className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-xl text-xs sm:text-sm font-medium transition-colors cursor-pointer"
-                title="Пропустить это фото и перейти к следующему"
-              >
+              <button onClick={onSkipCurrent} className="ofst-cell ofst-cell--muted" title="Пропустить это фото и перейти к следующему">
                 Пропустить фото
               </button>
             )}
-
             {!isBatch && (
-              <button
-                onClick={onCancel}
-                className="px-3.5 sm:px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-xl text-xs sm:text-sm font-medium transition-colors cursor-pointer"
-              >
+              <button onClick={onCancel} className="ofst-cell ofst-cell--muted">
                 Отмена
               </button>
             )}
           </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleSaveCrop}
-              disabled={isCropTooSmall}
-              className="flex items-center gap-1.5 px-4 sm:px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:hover:bg-blue-600 text-white rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-md shadow-blue-600/20 active:scale-95 cursor-pointer"
-            >
-              <Check size={16} />
-              <span>{isBatch && queueInfo.current < queueInfo.total ? 'Сохранить и дальше' : 'Готово'}</span>
-            </button>
-          </div>
+          <button onClick={handleSaveCrop} disabled={isCropTooSmall} className="ofst-cell ofst-cell--primary">
+            {isBatch && queueInfo.current < queueInfo.total ? 'Сохранить и дальше' : 'Готово'}
+          </button>
         </div>
       </div>
     </div>

@@ -26,6 +26,70 @@
   --color-gray-400: #9a9a9a; --color-gray-500: #6b6b6b; --color-gray-600: #4a4a4a; --color-gray-700: #222222;
   --color-gray-800: #111111; --color-gray-900: #000000;
   --color-yellow-300: #ffe500;
+  /* Warnings and errors read as the yellow marker with black text, not orange or red */
+  --color-yellow-50: #fff8c2; --color-yellow-100: #fff3a3;
+  --color-amber-50: #f2f2f1; --color-amber-100: #f2f2f1; --color-amber-400: #0a0a0a; --color-amber-500: #0a0a0a;
+  --color-amber-600: #0a0a0a; --color-amber-700: #0a0a0a; --color-amber-800: #0a0a0a; --color-amber-900: #0a0a0a;
+  --color-orange-50: #f2f2f1; --color-orange-100: #f2f2f1; --color-orange-500: #0a0a0a; --color-orange-600: #0a0a0a;
+  --color-orange-700: #0a0a0a; --color-orange-800: #0a0a0a;
+  --color-red-50: #fff8c2; --color-red-100: #fff3a3; --color-red-400: #0a0a0a; --color-red-500: #0a0a0a;
+  --color-red-600: #0a0a0a; --color-red-700: #0a0a0a; --color-red-800: #0a0a0a; --color-red-900: #0a0a0a;
+
+  /* No shadows: panels are flat, like the OFST site */
+  --shadow-2xs: 0 0 #0000; --shadow-xs: 0 0 #0000; --shadow-sm: 0 0 #0000; --shadow: 0 0 #0000;
+  --shadow-md: 0 0 #0000; --shadow-lg: 0 0 #0000; --shadow-xl: 0 0 #0000; --shadow-2xl: 0 0 #0000;
+}
+
+/* OFST tokens (same values as ofststudio.com) */
+:root {
+  --bg: #ffffff;
+  --fg: #0a0a0a;
+  --grey: #6a6a6a;
+  --soft: #f2f2f1;
+  --soft-2: #e4e4e2;
+  --marker: #ffe500;
+}
+
+/* Hairlines out: light grey frames disappear, parts are separated by fill (white panel on soft board).
+   Black lines stay: they are the running lines and the "selected" state. Unlayered, so it beats the utilities. */
+.border-gray-100, .border-gray-200, .border-gray-300, .border-gray-200\/80,
+.border-blue-100, .border-blue-200, .border-blue-300, .border-indigo-100\/80, .border-indigo-200, .border-indigo-300,
+.border-purple-100, .border-purple-200, .border-teal-200, .border-teal-300, .border-sky-300,
+.border-emerald-200, .border-emerald-300, .border-amber-100, .border-amber-200, .border-amber-200\/60,
+.border-red-200, .border-red-300, .border-pink-300 {
+  border-color: transparent;
+}
+.border-dashed { border-color: var(--soft-2); }
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), textarea, select {
+  background-color: var(--soft);
+  border-color: transparent;
+}
+input:focus, textarea:focus, select:focus { outline: 1px solid var(--fg); outline-offset: -1px; }
+::selection { background: var(--marker); color: var(--fg); }
+
+/* Shared OFST pieces. In the components layer, so Tailwind utilities (hidden, justify-start…) can still override them. */
+@layer components {
+/* The running line: small text standing on a 1px rule — how every part opens on ofststudio.com */
+.ofst-run {
+  display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 2px 16px;
+  font-size: 12px; line-height: 1.15; letter-spacing: .02em; color: var(--fg);
+  padding-bottom: 2px; border-bottom: 1px solid var(--fg);
+}
+.ofst-run > :not(:first-child) { color: var(--grey); }
+
+/* A text cell: the only button shape in the studio. No frame; fill on hover, black when on. */
+.ofst-cell {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 28px; padding: 0 8px; border: 0; background: transparent; color: var(--fg);
+  font: 500 13px/1 var(--font-sans); white-space: nowrap; cursor: pointer;
+}
+.ofst-cell:hover { background: var(--soft); }
+.ofst-cell.is-on { background: var(--fg); color: var(--bg); }
+.ofst-cell--primary { background: var(--fg); color: var(--bg); }
+.ofst-cell--primary:hover, .ofst-cell.is-on:hover { background: var(--marker); color: var(--fg); }
+.ofst-cell:disabled { opacity: .4; cursor: default; }
+.ofst-cell--muted { color: var(--grey); }
+.ofst-cell--muted:hover { color: var(--fg); }
 }
 
 /* No rounded corners anywhere, no soft glass blur */
@@ -46,11 +110,10 @@
     background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #d1d5db;
-    border-radius: 4px;
+    background: var(--soft-2);
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #9ca3af;
+    background: var(--grey);
   }
 }
 
