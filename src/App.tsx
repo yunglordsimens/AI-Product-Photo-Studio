@@ -49,6 +49,7 @@ import { ProductLibraryDrawer, loadGlobalProducts, saveGlobalProducts } from './
 import { compressImageDataUrl } from './utils/storage';
 import { ImageCropModal, CropAspectRatio, cropRatioValue } from './components/ImageCropModal';
 import { RightDrawer } from './components/RightDrawer';
+import { DockSlot } from './components/DockSlot';
 import { CatalogStudio } from './components/CatalogStudio';
 
 interface CanvasCropQueueItem {
@@ -133,14 +134,57 @@ export default function App() {
   type DockId = 'products' | 'ai' | 'menu';
   const [dockOrder, setDockOrder] = useState<DockId[]>([]);
   const dockRef = useRef<HTMLDivElement>(null);
+  const dockOpen: Record<DockId, boolean> = { products: isProductLibraryOpen, ai: isGenerationOpen, menu: isRightDrawerOpen };
+  // Newly opened panels join at the right edge; closed ones stay until their closing animation ends
   useEffect(() => {
-    const open: Record<DockId, boolean> = { products: isProductLibraryOpen, ai: isGenerationOpen, menu: isRightDrawerOpen };
-    setDockOrder((prev) => {
-      const kept = prev.filter((id) => open[id]);
-      const added = (Object.keys(open) as DockId[]).filter((id) => open[id] && !kept.includes(id));
-      return [...kept, ...added];
-    });
+    setDockOrder((prev) => [...prev, ...(Object.keys(dockOpen) as DockId[]).filter((id) => dockOpen[id] && !prev.includes(id))]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isProductLibraryOpen, isGenerationOpen, isRightDrawerOpen]);
+  const dropFromDock = useCallback(
+    (id: DockId) => setDockOrder((prev) => prev.filter((x) => x !== id || dockOpenRef.current[id])),
+    []
+  );
+  const dockOpenRef = useRef(dockOpen);
+  dockOpenRef.current = dockOpen;
+  const DOCK_MIN: Record<DockId, number> = { products: 420, ai: 340, menu: 240 };
+  const [dockWidths, setDockWidths] = useState<Record<DockId, number>>(() => {
+    const base = { products: 640, ai: 400, menu: 280 };
+    try {
+      return { ...base, ...JSON.parse(localStorage.getItem('aips_dock_widths') || '{}') };
+    } catch {
+      return base;
+    }
+  });
+  const resizeDock = useCallback((id: DockId, w: number) => {
+    setDockWidths((prev) => {
+      const next = { ...prev, [id]: w };
+      try {
+        localStorage.setItem('aips_dock_widths', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  // Projects column on the left can be hidden on desktop
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('aips_sidebar_collapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleSidebar = useCallback(() => {
+    if (window.innerWidth < 768) {
+      setIsMobileSidebarOpen((prev) => !prev);
+      return;
+    }
+    setIsSidebarCollapsed((prev) => {
+      try {
+        localStorage.setItem('aips_sidebar_collapsed', prev ? '0' : '1');
+      } catch {}
+      return !prev;
+    });
+  }, []);
   // A newly opened panel comes into view at the right edge
   useEffect(() => {
     const el = dockRef.current;
@@ -2024,7 +2068,8 @@ export default function App() {
         }
         selectedCount={selectedCardIds.size + selectedNoteIds.size}
         storageInfo={storageInfo}
-        onToggleSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
+        onToggleSidebar={toggleSidebar}
+        isSidebarCollapsed={isSidebarCollapsed}
         onAddImage={handleAddImageClick}
         onAddFolder={() => pickFolder('ask')}
         onClearAll={handleClearAll}
@@ -2064,6 +2109,8 @@ export default function App() {
           activeProjectId={activeProjectId}
           storageInfo={storageInfo}
           isMobileOpen={isMobileSidebarOpen}
+          isCollapsed={isSidebarCollapsed}
+          onCollapse={toggleSidebar}
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
           onSelectProject={handleSelectProject}
           onCreateProject={handleCreateProject}
@@ -2121,13 +2168,21 @@ export default function App() {
         <div
           id="studio-dock"
           ref={dockRef}
-          className="fixed top-10 right-0 bottom-0 z-40 flex max-w-full md:max-w-[calc(100vw-180px)] overflow-x-auto overflow-y-hidden overscroll-x-contain snap-x snap-mandatory md:snap-none custom-scrollbar"
+          className={`fixed top-10 right-0 bottom-0 z-40 flex max-w-full ${isSidebarCollapsed ? '' : 'md:max-w-[calc(100vw-180px)]'} overflow-x-auto overflow-y-hidden overscroll-x-contain snap-x snap-mandatory md:snap-none custom-scrollbar`}
         >
           {dockOrder.map((id) => (
-            <div key={id} className={`ofst-dock-slot ofst-dock-slot--${id} h-full snap-end`}>
+            <DockSlot
+              key={id}
+              id={id}
+              open={dockOpen[id]}
+              width={dockWidths[id]}
+              minWidth={DOCK_MIN[id]}
+              onResize={(w) => resizeDock(id, w)}
+              onClosed={() => dropFromDock(id)}
+            >
               {id === 'products' && (
                 <ProductLibraryDrawer
-                  isOpen={isProductLibraryOpen}
+                  isOpen={true}
                   onClose={() => setIsProductLibraryOpen(false)}
                   products={productsList}
                   onSaveProducts={handleSaveProducts}
@@ -2137,7 +2192,7 @@ export default function App() {
               )}
               {id === 'ai' && (
                 <GenerationPanel
-                  isOpen={isGenerationOpen}
+                  isOpen={true}
                   onClose={() => setIsGenerationOpen(false)}
                   selectedCards={selectedCardsList}
                   consideredNotes={consideredNotes}
@@ -2164,7 +2219,7 @@ export default function App() {
               )}
               {id === 'menu' && (
                 <RightDrawer
-                  isOpen={isRightDrawerOpen}
+                  isOpen={true}
                   onClose={() => setIsRightDrawerOpen(false)}
                   storageInfo={storageInfo}
                   onOpenSettings={() => setIsSettingsOpen(true)}
@@ -2192,7 +2247,7 @@ export default function App() {
                   onToggleTool={toggleTool}
                 />
               )}
-            </div>
+            </DockSlot>
           ))}
         </div>
       )}

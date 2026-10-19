@@ -51,6 +51,8 @@ interface TopBarProps {
   /** Tool ids switched off in the menu */
   hiddenTools?: string[];
   isMenuOpen?: boolean;
+  /** Projects column hidden on desktop: the «Проекты» cell then shows here to bring it back */
+  isSidebarCollapsed?: boolean;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -62,6 +64,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenRightDrawer,
   hiddenTools = [],
   isMenuOpen = false,
+  isSidebarCollapsed = false,
   onAddImage,
   onAddFolder,
   onClearAll,
@@ -241,7 +244,7 @@ export const TopBar: React.FC<TopBarProps> = ({
       {/* Studio name, project, count */}
       <div className="flex items-baseline gap-3 min-w-0 overflow-hidden text-[13px]">
         {onToggleSidebar && (
-          <button id="btn-toggle-sidebar" onClick={onToggleSidebar} className="ofst-cell md:hidden -ml-2" title="Список проектов" aria-label="Проекты">
+          <button id="btn-toggle-sidebar" onClick={onToggleSidebar} className={`ofst-cell -ml-2 ${isSidebarCollapsed ? '' : 'md:hidden'}`} title="Показать проекты" aria-label="Проекты">
             Проекты
           </button>
         )}
@@ -250,7 +253,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           {projectName} · {cardCount} фото
           {selectedCount > 0 && <span className="ml-1 text-[var(--fg)]">· выбрано {selectedCount}</span>}
         </span>
-        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.6 · 19.10</span>
+        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.7 · 19.10</span>
       </div>
 
       {/* Tools: text cells, reorderable by drag */}

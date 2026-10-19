@@ -7,6 +7,9 @@ interface SidebarProps {
   storageInfo: StorageInfo;
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
+  /** Desktop: the column folds to zero width */
+  isCollapsed?: boolean;
+  onCollapse?: () => void;
   onSelectProject: (id: string) => void;
   onCreateProject: () => void;
   onDeleteProject: (id: string) => void;
@@ -19,6 +22,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   storageInfo,
   isMobileOpen = false,
   onCloseMobile,
+  isCollapsed = false,
+  onCollapse,
   onSelectProject,
   onCreateProject,
   onDeleteProject,
@@ -57,14 +62,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       <aside
         id="sidebar-projects"
-        className={`bg-white flex flex-col shrink-0 select-none z-50 md:z-20 transition-transform duration-200 ease-in-out fixed inset-y-0 left-0 w-[240px] md:relative md:w-[180px] md:translate-x-0 ${
-          isMobileOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        className={`ofst-sidebar bg-white shrink-0 select-none z-50 md:z-20 overflow-hidden fixed inset-y-0 left-0 w-[240px] md:relative md:translate-x-0 ${
+          isCollapsed ? 'md:w-0' : 'md:w-[180px]'
+        } ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
       >
+        {/* Fixed-width inner column, so nothing reflows while the sidebar folds */}
+        <div className="flex flex-col h-full w-[240px] md:w-[180px]">
         <div className="px-2 pt-2">
           <div className="ofst-run">
             <span>Проекты</span>
-            <span>{projects.length}</span>
+            <span className="flex gap-3">
+              <span>{projects.length}</span>
+              {onCollapse && (
+                <button onClick={onCollapse} className="hidden md:inline hover:text-[var(--fg)] cursor-pointer" title="Скрыть колонку проектов">
+                  скрыть
+                </button>
+              )}
+            </span>
           </div>
         </div>
 
@@ -153,6 +167,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               Закрыть
             </button>
           )}
+        </div>
         </div>
       </aside>
     </>
