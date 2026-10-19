@@ -44,6 +44,7 @@ import { GenerationPanel, ConsideredNoteInfo } from './components/GenerationPane
 import { MasterPromptsModal } from './components/MasterPromptsModal';
 import { StyleAnalysisModal } from './components/StyleAnalysisModal';
 import { ProductLibraryDrawer, loadGlobalProducts, saveGlobalProducts } from './components/ProductLibraryDrawer';
+import { compressImageDataUrl } from './utils/storage';
 import { ImageCropModal, CropAspectRatio, cropRatioValue } from './components/ImageCropModal';
 import { RightDrawer } from './components/RightDrawer';
 import { CatalogStudio } from './components/CatalogStudio';
@@ -534,11 +535,62 @@ export default function App() {
     [activeProject, activeProjectId, projects, saveProjectsToStorage]
   );
 
+  // A dropped / picked folder first asks what it is: products (positions) or photos for the board
+  const [pendingFolder, setPendingFolder] = useState<{ files: FolderFile[]; pos?: { x: number; y: number } } | null>(null);
+  const askAboutFolder = useCallback((files: FolderFile[], pos?: { x: number; y: number }) => {
+    if (files.length > 0) setPendingFolder({ files, pos });
+  }, []);
+
+  const handleImportFolderAsProducts = useCallback(
+    async (folderFiles: FolderFile[]) => {
+      const groupsIn = groupByFolder(folderFiles);
+      const norm = (t: string) => t.normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim();
+      const next = [...productsList];
+      let added = 0;
+      let filled = 0;
+      let done = 0;
+      for (const g of groupsIn) {
+        const files = await normalizeImageFiles(g.files.map((f) => f.file));
+        for (const file of files) {
+          setFolderImportStatus(`Продукты: ${++done} из ${folderFiles.length} — ${g.name}`);
+          const raw = await new Promise<string>((resolve) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result as string);
+            r.onerror = () => resolve('');
+            r.readAsDataURL(file);
+          });
+          if (!raw) continue;
+          const photo = await compressImageDataUrl(raw, 1200, 0.85);
+          const name = file.name.replace(/\.[^.]+$/, '');
+          const idx = next.findIndex((p) => norm(p.name) === norm(name));
+          if (idx >= 0) {
+            next[idx] = { ...next[idx], photoDataUrl: photo, category: next[idx].category || g.name };
+            filled++;
+          } else {
+            next.push({
+              id: `prod_${Date.now()}_${done}_${Math.random().toString(36).substr(2, 4)}`,
+              name,
+              photoDataUrl: photo,
+              category: g.name,
+            });
+            added++;
+          }
+        }
+      }
+      setFolderImportStatus(null);
+      setProductsList(next);
+      saveGlobalProducts(next);
+      setStorageWarning(`Продукты: добавлено ${added}, фото обновлено у ${filled}. Открой «Продукты», чтобы посмотреть.`);
+      setIsProductLibraryOpen(true);
+    },
+    [productsList]
+  );
+
   const folderInputRef = useRef<HTMLInputElement>(null);
   const handleFolderInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files: File[] = e.target.files ? Array.from(e.target.files) : [];
     e.target.value = '';
-    if (files.length > 0) await handleAddFolder(folderFilesFromInput(files));
+    if (files.length > 0) askAboutFolder(folderFilesFromInput(files));
   };
 
   // Save current cropped canvas image and proceed to next in queue
@@ -1708,6 +1760,43 @@ export default function App() {
       className="flex flex-col w-screen h-screen overflow-hidden bg-[#f3f4f6] text-[#1f2937] font-sans relative"
     >
       {/* Storage Warning Banner (>80%) */}
+      {pendingFolder && (
+        <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" onClick={() => setPendingFolder(null)}>
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Что в этой папке?</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {pendingFolder.files.length} фото, папок внутри: {groupByFolder(pendingFolder.files).length}
+              </p>
+            </div>
+            <button
+              className="w-full text-left p-3 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 cursor-pointer"
+              onClick={() => {
+                const f = pendingFolder.files;
+                setPendingFolder(null);
+                handleImportFolderAsProducts(f);
+              }}
+            >
+              <div className="text-sm font-semibold text-blue-900">Продукты / позиции меню</div>
+              <div className="text-[11px] text-blue-800/80">В библиотеку продуктов. Название = имя файла, категория = подпапка. Если позиция уже есть — к ней добавится фото.</div>
+            </button>
+            <button
+              className="w-full text-left p-3 rounded-xl border border-gray-200 hover:bg-gray-50 cursor-pointer"
+              onClick={() => {
+                const { files, pos } = pendingFolder;
+                setPendingFolder(null);
+                handleAddFolder(files, pos);
+              }}
+            >
+              <div className="text-sm font-semibold text-gray-900">Фото на доску</div>
+              <div className="text-[11px] text-gray-500">Референсы и всё остальное: каждая подпапка станет группой на доске.</div>
+            </button>
+            <button className="w-full text-xs text-gray-500 hover:text-gray-800 py-1 cursor-pointer" onClick={() => setPendingFolder(null)}>
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
       {folderImportStatus && (
         <div className="bg-blue-600 text-white text-xs px-4 py-2 shadow-md z-40">{folderImportStatus}</div>
       )}
@@ -1793,7 +1882,7 @@ export default function App() {
 
         <Canvas
           project={activeProject}
-          onAddFolder={handleAddFolder}
+          onAddFolder={askAboutFolder}
           selectedCardIds={selectedCardIds}
           selectedNoteIds={selectedNoteIds}
           pan={activeProject.pan || { x: 80, y: 80 }}

@@ -60,6 +60,7 @@ export interface ProductItem {
   id: string;
   name: string;
   photoDataUrl: string;
+  category?: string; // e.g. the subfolder it came from ("Káva", "Poke Bowls")
 }
 
 export interface MasterPrompt {
