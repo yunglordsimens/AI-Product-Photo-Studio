@@ -364,22 +364,50 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const wheelHandlerRef = useRef(handleWheel);
   wheelHandlerRef.current = handleWheel;
+  const onUpdatePanZoomRef = useRef(onUpdatePanZoom);
+  onUpdatePanZoomRef.current = onUpdatePanZoom;
+  const gestureStartRef = useRef<{ zoom: number; pan: { x: number; y: number } } | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => wheelHandlerRef.current(e);
-    // Safari sends its own gesture events for pinch; stop the page zoom there too
-    const stopGesture = (e: Event) => e.preventDefault();
+    // Safari (incl. "Add to Dock" web apps) sends trackpad pinch as gesture events, not ctrl+wheel:
+    // stop the page zoom and zoom the canvas instead.
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      gestureStartRef.current = { zoom: zoomRef.current, pan: panRef.current };
+    };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      const g = e as Event & { scale?: number; clientX?: number; clientY?: number };
+      const start = gestureStartRef.current;
+      if (!start || !g.scale || !containerRef.current) return;
+      const nextZoom = Math.max(0.1, Math.min(start.zoom * g.scale, 4.0));
+      const rect = containerRef.current.getBoundingClientRect();
+      const mx = (g.clientX ?? rect.left + rect.width / 2) - rect.left;
+      const my = (g.clientY ?? rect.top + rect.height / 2) - rect.top;
+      onUpdatePanZoomRef.current(
+        {
+          x: mx - (mx - start.pan.x) * (nextZoom / start.zoom),
+          y: my - (my - start.pan.y) * (nextZoom / start.zoom),
+        },
+        nextZoom
+      );
+    };
+    const onGestureEnd = (e: Event) => {
+      e.preventDefault();
+      gestureStartRef.current = null;
+    };
     el.addEventListener('wheel', onWheel, { passive: false });
-    el.addEventListener('gesturestart', stopGesture);
-    el.addEventListener('gesturechange', stopGesture);
-    el.addEventListener('gestureend', stopGesture);
+    el.addEventListener('gesturestart', onGestureStart);
+    el.addEventListener('gesturechange', onGestureChange);
+    el.addEventListener('gestureend', onGestureEnd);
     return () => {
       el.removeEventListener('wheel', onWheel);
-      el.removeEventListener('gesturestart', stopGesture);
-      el.removeEventListener('gesturechange', stopGesture);
-      el.removeEventListener('gestureend', stopGesture);
+      el.removeEventListener('gesturestart', onGestureStart);
+      el.removeEventListener('gesturechange', onGestureChange);
+      el.removeEventListener('gestureend', onGestureEnd);
     };
   }, []);
 
@@ -1347,12 +1375,15 @@ export const Canvas: React.FC<CanvasProps> = ({
                 width: `${w}px`,
                 height: `${h}px`,
                 zIndex: 4,
-                backgroundColor: 'rgba(100, 100, 255, 0.08)',
+                backgroundColor: `${group.color || '#6366f1'}14`,
+                borderColor: group.color || '#818cf8',
               }}
-              className="absolute rounded-2xl border-2 border-dashed border-indigo-400/80 pointer-events-auto transition-all hover:border-indigo-600 hover:bg-indigo-500/15 cursor-grab active:cursor-grabbing group/grp select-none shadow-xs"
+              className="absolute rounded-2xl border-2 border-dashed pointer-events-auto transition-all hover:border-indigo-600 hover:bg-indigo-500/15 cursor-grab active:cursor-grabbing group/grp select-none shadow-xs"
               onMouseDown={(e) => handleGroupMouseDown(e, group)}
             >
-              <div className="absolute -top-7 left-2 flex items-center gap-1.5 bg-indigo-600 text-white text-[11px] font-medium px-2.5 py-1 rounded-lg shadow-sm select-none">
+              <div
+                style={{ backgroundColor: group.color || '#4f46e5' }}
+                className="absolute -top-7 left-2 flex items-center gap-1.5 text-white text-[11px] font-medium px-2.5 py-1 rounded-lg shadow-sm select-none">
                 <Layers className="w-3 h-3" />
                 <span>{group.name || 'Группа'}</span>
                 <span className="opacity-75 font-mono">({memberCards.length})</span>

@@ -69,6 +69,49 @@ function withSourceFixPrompts(prompts: MasterPrompt[]): MasterPrompt[] {
   return merged;
 }
 
+
+/** Pack 2 (Oct 19, 2026): more looks to play with — catalog, scenes, campaigns, and Oryza's house style. */
+export const STYLE_PACK_PROMPTS: MasterPrompt[] = [
+  // Catalog — same shot for every item
+  { id: 'mp2_cat_flash_concrete', name: 'Каталог: вспышка на бетоне', prompt: 'Product on raw grey concrete floor against a matte grey wall, direct on-camera flash, hard crisp shadow straight behind, eye level, product centred filling 65% of the frame, slightly cool neutral colour, sharp edge to edge.', tags: ['каталог', 'вспышка', 'бетон'], createdAt: 1700000200000 },
+  { id: 'mp2_cat_black_void', name: 'Каталог: чёрная пустота', prompt: 'Product floating-still on pure black seamless background, one narrow strip softbox from the left drawing a clean rim highlight, deep shadows, no reflections on the floor, centred, premium and quiet.', tags: ['каталог', 'чёрный фон', 'премиум'], createdAt: 1700000201000 },
+  { id: 'mp2_cat_topdown_flash', name: 'Каталог: сверху со вспышкой', prompt: 'Strict top-down view (90 degrees), product centred on a single flat colour surface, hard flash from above-left, short sharp shadow to the lower right, nothing else in frame, magazine flat-lay precision.', tags: ['каталог', 'сверху', 'вспышка'], createdAt: 1700000202000 },
+  { id: 'mp2_cat_colour_paper', name: 'Каталог: цветная бумага', prompt: 'Product on a seamless coloured paper sweep in one saturated colour taken from the product itself, soft frontal light, gentle gradient to the top, product centred, playful but clean.', tags: ['каталог', 'цвет', 'бумага'], createdAt: 1700000203000 },
+  { id: 'mp2_cat_hard_sun', name: 'Каталог: жёсткое солнце', prompt: 'Product on a light stone surface in hard late-afternoon sun, long graphic shadow across the frame, a few leaf shadows on the wall behind, warm but clean colour, eye level.', tags: ['каталог', 'солнце', 'тени'], createdAt: 1700000204000 },
+  // Scenes
+  { id: 'mp2_scene_steel', name: 'Сцена: нержавейка и холод', prompt: 'Product on brushed stainless steel counter, cold fluorescent top light, subtle reflections, industrial kitchen behind out of focus, clinical and sharp, slight green-blue cast.', tags: ['сцена', 'металл', 'индастриал'], createdAt: 1700000210000 },
+  { id: 'mp2_scene_night_neon', name: 'Сцена: ночь и неон', prompt: 'Product on a wet dark street surface at night, coloured neon signs blurred in the background, reflections in puddles, cinematic 35mm look, high contrast, slight grain.', tags: ['сцена', 'ночь', 'неон'], createdAt: 1700000211000 },
+  { id: 'mp2_scene_konbini', name: 'Сцена: ночной магазинчик', prompt: 'Product on the counter of a small Asian convenience store at night, bright cool shelf lighting, colourful packaging softly out of focus behind, candid snapshot feel, direct flash.', tags: ['сцена', 'Азия', 'вспышка'], createdAt: 1700000212000 },
+  { id: 'mp2_scene_brutalist', name: 'Сцена: брутализм', prompt: 'Product placed on a massive concrete block in a brutalist architectural space, strong geometric shadows, overcast daylight, wide composition with lots of negative space, monochrome palette with the product as the only colour.', tags: ['сцена', 'архитектура', 'бетон'], createdAt: 1700000213000 },
+  // Campaign / editorial
+  { id: 'mp2_camp_y2k_flash', name: 'Кампейн: Y2K вспышка', prompt: 'Editorial party snapshot: product held in a hand with chipped silver nail polish, harsh direct flash, dark background, slight motion blur, early-2000s digicam colour, playful and raw.', tags: ['кампейн', 'руки', 'вспышка'], createdAt: 1700000220000 },
+  { id: 'mp2_camp_levitate', name: 'Кампейн: левитация', prompt: 'Product levitating mid-air with a slight tilt, crisp shadow on the floor below, clean coloured studio set, a few ingredients or elements of the product frozen in the air around it, high-speed sharpness.', tags: ['кампейн', 'левитация'], createdAt: 1700000221000 },
+  { id: 'mp2_camp_macro', name: 'Кампейн: макро фактура', prompt: 'Extreme macro of the product surface and material, shallow depth of field, single raking light revealing texture, abstract and tactile, the product still recognisable at the edge of the frame.', tags: ['кампейн', 'макро', 'фактура'], createdAt: 1700000222000 },
+  { id: 'mp2_camp_cinematic_dusk', name: 'Кампейн: киношные сумерки', prompt: 'Product in a real place at blue hour, warm practical lamp light on the product against cool ambient sky, anamorphic cinematic framing 2.39:1 feel, soft haze, shallow depth of field.', tags: ['кампейн', 'кино', 'сумерки'], createdAt: 1700000223000 },
+  { id: 'mp2_camp_hands_diverse', name: 'Кампейн: в руке (разные руки)', prompt: 'Product held naturally in one hand, everyday gesture, the hand differs from shot to shot (skin tone, age, rings, nails), neutral background, soft window light, product label facing the camera and unchanged.', tags: ['кампейн', 'руки', 'лайфстайл'], createdAt: 1700000224000 },
+  // Oryza house style (taken from their own menu photos)
+  { id: 'mp2_oryza_table', name: 'Oryza: стол и стена (напитки)', prompt: "Oryza house style: the drink or product stands on Oryza's oval walnut tray with the engraved 'oryza' logo, on a dark walnut table against a plain warm-white wall. Camera at table height, straight horizon, tray fully in frame and centred, soft even daylight from the left, neutral white balance, no clutter. Keep the drink, glass, garnish and any label exactly as in the source photo.", tags: ['oryza', 'каталог', 'напитки'], createdAt: 1700000230000 },
+  { id: 'mp2_oryza_topdown', name: 'Oryza: еда сверху', prompt: "Oryza house style for food: strict top-down view of the same plate on a dark walnut table, plate centred with even margin, soft diffused daylight, true colours of the food, no extra props. The dish, portion, ingredients and plate must stay exactly as in the source photo.", tags: ['oryza', 'каталог', 'еда'], createdAt: 1700000231000 },
+  { id: 'mp2_oryza_restage', name: 'Oryza: перенести в фирменный стиль', prompt: "Re-stage this exact item into Oryza's house style: dark walnut table, plain warm-white wall, oval walnut tray with the 'oryza' logo for drinks, camera at table height, soft even daylight. Do not change the item itself: same glass or plate, same contents, colours, garnish and portion.", tags: ['oryza', 'перенос стиля'], createdAt: 1700000232000 },
+];
+
+const STYLE_PACK_FLAG = 'aips_style_pack_v2';
+
+/** Adds pack-2 prompts once to libraries saved before they existed. */
+function withStylePack(prompts: MasterPrompt[]): MasterPrompt[] {
+  try {
+    if (localStorage.getItem(STYLE_PACK_FLAG)) return prompts;
+    localStorage.setItem(STYLE_PACK_FLAG, '1');
+  } catch {
+    return prompts;
+  }
+  const missing = STYLE_PACK_PROMPTS.filter((sp) => !prompts.some((p) => p.id === sp.id));
+  if (missing.length === 0) return prompts;
+  const merged = [...prompts, ...missing];
+  idbSet(STORAGE_KEY_MASTER_PROMPTS, merged).catch(() => {});
+  return merged;
+}
+
 export const DEFAULT_MASTER_PROMPTS: MasterPrompt[] = [
   ...SOURCE_FIX_PROMPTS,
   {
@@ -106,6 +149,7 @@ export const DEFAULT_MASTER_PROMPTS: MasterPrompt[] = [
     tags: ['эко', 'природа', 'камень', 'растения'],
     createdAt: 1700000004000,
   },
+  ...STYLE_PACK_PROMPTS,
 ];
 
 export function getInitialProjects(): Project[] {
@@ -460,7 +504,7 @@ export async function loadMasterPromptsAsync(): Promise<MasterPrompt[]> {
   try {
     const fromIdb = await idbGet<MasterPrompt[]>(STORAGE_KEY_MASTER_PROMPTS);
     if (fromIdb && Array.isArray(fromIdb) && fromIdb.length > 0) {
-      const merged = withSourceFixPrompts(fromIdb);
+      const merged = withStylePack(withSourceFixPrompts(fromIdb));
       inMemoryMasterPromptsCache = merged;
       return merged;
     }

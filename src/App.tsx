@@ -1545,13 +1545,30 @@ export default function App() {
     try {
       const tags = await analyzeStyleWithGemini(apiKey, cardsToAnalyze);
       setStyleAnalysisTags(tags);
+
+      // Keep the result on the board as a note next to the analysed photos, so it doesn't vanish with the window
+      const maxRight = Math.max(...cardsToAnalyze.map((c) => c.x + c.width));
+      const minTop = Math.min(...cardsToAnalyze.map((c) => c.y));
+      const styleNote: Note = {
+        id: `note_style_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+        x: Math.round(maxRight + 24),
+        y: Math.round(minTop),
+        width: 220,
+        height: 160,
+        text: `Стиль (${cardsToAnalyze.length} фото): ${tags}`,
+        color: 'blue',
+        attachedTo: null,
+        projectId: activeProject.id,
+        zIndex: 20,
+      };
+      handleUpdateNotes([...(activeProject.notes || []), styleNote]);
     } catch (err: any) {
       console.error('Style analysis error:', err);
       setStyleAnalysisTags(`Ошибка: ${err?.message || 'Не удалось проанализировать стиль'}`);
     } finally {
       setIsAnalyzingStyle(false);
     }
-  }, [activeProject, selectedCardIds]);
+  }, [activeProject, selectedCardIds, handleUpdateNotes]);
 
   const handleSaveStyleAsMasterPrompt = useCallback(
     (tagsText: string) => {

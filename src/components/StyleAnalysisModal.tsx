@@ -157,6 +157,12 @@ export const StyleAnalysisModal: React.FC<StyleAnalysisModalProps> = ({
                   </div>
                 </div>
               )}
+              {!editedTags.startsWith('Ошибка') && (
+                <p className="mt-3 text-[11px] text-gray-500">
+                  Копия уже лежит на доске синей заметкой рядом с этими фото. Дальше: «Использовать в генерации» — теги
+                  встанут в промпт; «Сохранить как мастер-промпт» — стиль останется в библиотеке для любых проектов.
+                </p>
+              )}
             </>
           )}
         </div>

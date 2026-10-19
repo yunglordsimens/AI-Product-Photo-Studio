@@ -123,7 +123,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               <span className="sm:hidden truncate max-w-[90px]">{projectName}</span>
             </h1>
             <span className="hidden md:inline-block text-[10px] px-1.5 py-0.2 bg-gray-100 text-gray-600 border border-gray-200 rounded font-mono">
-              v1.2
+              v1.3 · 19.10
             </span>
           </div>
           <p className="hidden sm:block text-[10px] sm:text-[11px] text-gray-500 truncate max-w-[120px] md:max-w-xs">

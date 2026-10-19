@@ -27,4 +27,7 @@ html, body, #root {
   -webkit-user-select: none;
   background-color: #f3f4f6;
   color: #1f2937;
+  /* App-like: the page itself never pinch-zooms or bounces (panels still scroll) */
+  touch-action: pan-x pan-y;
+  overscroll-behavior: none;
 }
