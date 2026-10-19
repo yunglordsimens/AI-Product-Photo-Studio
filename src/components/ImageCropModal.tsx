@@ -6,6 +6,7 @@ import {
   Maximize2,
   Square,
   RectangleHorizontal,
+  RectangleVertical,
   Crop,
   Layers,
   Sparkles,
@@ -13,7 +14,23 @@ import {
   CheckCheck,
 } from 'lucide-react';
 
-export type CropAspectRatio = '1:1' | '4:3' | '16:9' | 'free';
+export type CropAspectRatio = '1:1' | '4:3' | '3:4' | '4:5' | '16:9' | '9:16' | 'free';
+
+/** Width / height for a crop preset, or null for free cropping. */
+export function cropRatioValue(r: CropAspectRatio): number | null {
+  if (r === 'free') return null;
+  const [w, h] = r.split(':').map(Number);
+  return w / h;
+}
+
+const CROP_PRESETS: { id: CropAspectRatio; title: string }[] = [
+  { id: '1:1', title: 'Квадрат 1:1' },
+  { id: '4:3', title: 'Горизонталь 4:3' },
+  { id: '3:4', title: 'Вертикаль 3:4' },
+  { id: '4:5', title: 'Вертикаль 4:5 (Instagram)' },
+  { id: '16:9', title: 'Широкий 16:9' },
+  { id: '9:16', title: 'Сторис 9:16' },
+];
 
 interface ImageCropModalProps {
   isOpen: boolean;
@@ -132,10 +149,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     });
 
     // Initialize crop box according to aspect ratio
-    let targetRatio: number | null = null;
-    if (aspectRatio === '1:1') targetRatio = 1.0;
-    else if (aspectRatio === '4:3') targetRatio = 4 / 3;
-    else if (aspectRatio === '16:9') targetRatio = 16 / 9;
+    const targetRatio: number | null = cropRatioValue(aspectRatio);
 
     let cropW = dispW;
     let cropH = dispH;
@@ -190,10 +204,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     setAspectRatio(ratio);
     if (imageLayout.width === 0 || imageLayout.height === 0) return;
 
-    let targetRatio: number | null = null;
-    if (ratio === '1:1') targetRatio = 1.0;
-    else if (ratio === '4:3') targetRatio = 4 / 3;
-    else if (ratio === '16:9') targetRatio = 16 / 9;
+    const targetRatio: number | null = cropRatioValue(ratio);
 
     if (targetRatio === null) {
       return;
@@ -260,10 +271,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     const maxW = imageLayout.width;
     const maxH = imageLayout.height;
 
-    let targetRatio: number | null = null;
-    if (aspectRatio === '1:1') targetRatio = 1.0;
-    else if (aspectRatio === '4:3') targetRatio = 4 / 3;
-    else if (aspectRatio === '16:9') targetRatio = 16 / 9;
+    const targetRatio: number | null = cropRatioValue(aspectRatio);
 
     if (handle === 'move') {
       let nextX = startCrop.x + dx;
@@ -510,44 +518,25 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
         <div className="px-3 sm:px-6 py-2 bg-gray-950/70 border-b border-gray-800/80 flex flex-wrap items-center justify-between gap-2 shrink-0">
           {/* Aspect ratio buttons */}
           <div className="flex items-center gap-1 bg-gray-900 p-0.5 sm:p-1 rounded-xl border border-gray-800">
-            <button
-              onClick={() => handleSelectAspectRatio('1:1')}
-              className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
-                aspectRatio === '1:1'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
-              }`}
-              title="Квадрат 1:1"
-            >
-              <Square size={13} />
-              <span>1:1</span>
-            </button>
-
-            <button
-              onClick={() => handleSelectAspectRatio('4:3')}
-              className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
-                aspectRatio === '4:3'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
-              }`}
-              title="Формат 4:3"
-            >
-              <RectangleHorizontal size={14} />
-              <span>4:3</span>
-            </button>
-
-            <button
-              onClick={() => handleSelectAspectRatio('16:9')}
-              className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
-                aspectRatio === '16:9'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
-              }`}
-              title="Широкоформатный 16:9"
-            >
-              <RectangleHorizontal size={14} className="scale-x-125" />
-              <span>16:9</span>
-            </button>
+            {CROP_PRESETS.map((preset) => {
+              const r = cropRatioValue(preset.id) || 1;
+              const Icon = r > 1 ? RectangleHorizontal : r < 1 ? RectangleVertical : Square;
+              return (
+                <button
+                  key={preset.id}
+                  onClick={() => handleSelectAspectRatio(preset.id)}
+                  className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
+                    aspectRatio === preset.id
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
+                  }`}
+                  title={preset.title}
+                >
+                  <Icon size={13} />
+                  <span>{preset.id}</span>
+                </button>
+              );
+            })}
 
             <button
               onClick={() => handleSelectAspectRatio('free')}

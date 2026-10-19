@@ -77,7 +77,7 @@ export const StyleAnalysisModal: React.FC<StyleAnalysisModalProps> = ({
               <h2 className="text-base font-semibold text-gray-900 leading-tight">
                 Результат анализа стиля
               </h2>
-              <p className="text-xs text-gray-500">Gemini 2.5 Flash выделил ключевые параметры</p>
+              <p className="text-xs text-gray-500">Gemini описал свет, фон, цвет и ракурс</p>
             </div>
           </div>
           <button

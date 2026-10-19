@@ -4,6 +4,7 @@ import { CardItem } from './CardItem';
 import { NoteItem } from './NoteItem';
 import { ZoomControls } from './ZoomControls';
 import { isImageFile } from '../utils/heic';
+import { FolderFile, collectFolderFiles, folderEntriesFromDrop } from '../utils/folderImport';
 import {
   Layers,
   Sparkles,
@@ -32,6 +33,7 @@ interface CanvasProps {
   onDuplicateCard: (card: Card) => void;
   onPreviewCard: (card: Card) => void;
   onAddImages: (files: File[], atCanvasPos?: { x: number; y: number }) => void;
+  onAddFolder?: (files: FolderFile[], atCanvasPos?: { x: number; y: number }) => void;
   onAddNote: (note: Note) => void;
   onDeleteNote: (noteId: string) => void;
   onUpdateNoteText: (noteId: string, text: string) => void;
@@ -69,6 +71,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onDuplicateCard,
   onPreviewCard,
   onAddImages,
+  onAddFolder,
   onAddNote,
   onDeleteNote,
   onUpdateNoteText,
@@ -1184,6 +1187,13 @@ export const Canvas: React.FC<CanvasProps> = ({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
+    // A dropped folder: keep its structure (one group per subfolder), no crop queue
+    const folderEntries = onAddFolder ? folderEntriesFromDrop(e.dataTransfer) : null;
+    if (folderEntries && onAddFolder) {
+      const dropPos = screenToCanvas(e.clientX, e.clientY);
+      collectFolderFiles(folderEntries).then((files) => onAddFolder(files, dropPos));
+      return;
+    }
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const files = Array.from(e.dataTransfer.files).filter((f: File) => isImageFile(f));
       if (files.length > 0) {

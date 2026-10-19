@@ -32,6 +32,7 @@ import { compressAndLoadImage, compressDataUrl, createSampleCard } from './utils
 import { getStoredApiKey, hasGenerationAccess, generateImageWithGemini, analyzeStyleWithGemini, getImageModel } from './utils/gemini';
 import { SOURCE_FIX_MARKER } from './utils/storage';
 import { isImageFile, normalizeImageFiles } from './utils/heic';
+import { FolderFile, groupByFolder, folderFilesFromInput } from './utils/folderImport';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { Canvas } from './components/Canvas';
@@ -43,7 +44,7 @@ import { GenerationPanel, ConsideredNoteInfo } from './components/GenerationPane
 import { MasterPromptsModal } from './components/MasterPromptsModal';
 import { StyleAnalysisModal } from './components/StyleAnalysisModal';
 import { ProductLibraryDrawer, loadGlobalProducts, saveGlobalProducts } from './components/ProductLibraryDrawer';
-import { ImageCropModal, CropAspectRatio } from './components/ImageCropModal';
+import { ImageCropModal, CropAspectRatio, cropRatioValue } from './components/ImageCropModal';
 import { RightDrawer } from './components/RightDrawer';
 import { CatalogStudio } from './components/CatalogStudio';
 
@@ -440,6 +441,106 @@ export default function App() {
     []
   );
 
+  // Folder import: no crop queue; one group per subfolder, laid out as blocks
+  const [folderImportStatus, setFolderImportStatus] = useState<string | null>(null);
+  const handleAddFolder = useCallback(
+    async (folderFiles: FolderFile[], atCanvasPos?: { x: number; y: number }) => {
+      if (folderFiles.length === 0) return;
+      const groupsIn = groupByFolder(folderFiles);
+      const CARD_W = 200;
+      const GAP = 24;
+      const COLS = 6;
+      const groupColors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#ef4444', '#84cc16'];
+      const startX = atCanvasPos?.x ?? (-(activeProject.pan?.x || 80) + 120) / (activeProject.zoom || 1);
+      let cursorY = atCanvasPos?.y ?? (-(activeProject.pan?.y || 80) + 120) / (activeProject.zoom || 1);
+      const existingCards = activeProject.cards || [];
+      let z = existingCards.reduce((m, c) => Math.max(m, c.zIndex || 1), 1);
+      const newCards: Card[] = [];
+      const newGroups: CardGroup[] = [];
+      let done = 0;
+      const total = folderFiles.length;
+
+      for (let gi = 0; gi < groupsIn.length; gi++) {
+        const g = groupsIn[gi];
+        const files = await normalizeImageFiles(g.files.map((f) => f.file));
+        const rowHeights: number[] = [];
+        const groupCardIds: string[] = [];
+        for (let i = 0; i < files.length; i++) {
+          setFolderImportStatus(`Загружаю ${++done} из ${total}: ${g.name}`);
+          const raw = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(files[i]);
+          }).catch(() => '');
+          if (!raw) continue;
+          const src = await compressDataUrl(raw, 1024, 1024, 0.85);
+          const dims = await new Promise<{ w: number; h: number }>((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve({ w: img.naturalWidth || 1, h: img.naturalHeight || 1 });
+            img.onerror = () => resolve({ w: 4, h: 3 });
+            img.src = src;
+          });
+          const h = Math.round(CARD_W * (dims.h / dims.w));
+          const col = i % COLS;
+          const row = Math.floor(i / COLS);
+          const rowTop = cursorY + rowHeights.slice(0, row).reduce((a, b) => a + b + GAP + 34, 0);
+          rowHeights[row] = Math.max(rowHeights[row] || 0, h);
+          const card: Card = {
+            id: `card_dir_${Date.now()}_${gi}_${i}_${Math.random().toString(36).substr(2, 4)}`,
+            x: Math.round(startX + col * (CARD_W + GAP)),
+            y: Math.round(rowTop),
+            width: CARD_W,
+            height: h,
+            src,
+            name: files[i].name.replace(/\.[^.]+$/, ''),
+            aspectRatio: CARD_W / h,
+            zIndex: ++z,
+          };
+          newCards.push(card);
+          groupCardIds.push(card.id);
+        }
+        if (groupCardIds.length > 0) {
+          newGroups.push({
+            id: `group_dir_${Date.now()}_${gi}_${Math.random().toString(36).substr(2, 4)}`,
+            type: 'group',
+            name: g.name,
+            children: groupCardIds,
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            color: groupColors[gi % groupColors.length],
+          });
+        }
+        const blockHeight = rowHeights.reduce((a, b) => a + b + GAP + 34, 0);
+        cursorY += blockHeight + 110;
+      }
+
+      setFolderImportStatus(null);
+      saveProjectsToStorage(
+        projects.map((p) =>
+          p.id === activeProjectId
+            ? {
+                ...p,
+                cards: [...(p.cards || []), ...newCards],
+                groups: [...(p.groups || []), ...newGroups],
+                updatedAt: Date.now(),
+              }
+            : p
+        )
+      );
+    },
+    [activeProject, activeProjectId, projects, saveProjectsToStorage]
+  );
+
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const handleFolderInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files: File[] = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = '';
+    if (files.length > 0) await handleAddFolder(folderFilesFromInput(files));
+  };
+
   // Save current cropped canvas image and proceed to next in queue
   const handleSaveCanvasCrop = useCallback(
     (croppedDataUrl: string, croppedWidth: number, croppedHeight: number) => {
@@ -550,10 +651,7 @@ export default function App() {
             const img = new Image();
             img.crossOrigin = 'anonymous';
             img.onload = () => {
-              let targetRatio: number | null = null;
-              if (aspectRatio === '1:1') targetRatio = 1.0;
-              else if (aspectRatio === '4:3') targetRatio = 4 / 3;
-              else if (aspectRatio === '16:9') targetRatio = 16 / 9;
+              const targetRatio: number | null = cropRatioValue(aspectRatio);
 
               let sx = 0;
               let sy = 0;
@@ -1093,7 +1191,7 @@ export default function App() {
   // Handle Gemini Image Generation
   const handleTriggerGeminiGeneration = async (
     prompt: string,
-    options?: { isProductReplacement?: boolean; selectedProduct?: ProductItem; masterPromptName?: string }
+    options?: { isProductReplacement?: boolean; selectedProduct?: ProductItem; masterPromptName?: string; photoRole?: 'product' | 'style' }
   ) => {
     const apiKey = getStoredApiKey();
     if (!hasGenerationAccess()) {
@@ -1118,6 +1216,7 @@ export default function App() {
         {
           isProductReplacement: options?.isProductReplacement,
           productImageDataUrl: options?.selectedProduct?.photoDataUrl,
+          photoRole: options?.photoRole,
         }
       );
 
@@ -1609,6 +1708,9 @@ export default function App() {
       className="flex flex-col w-screen h-screen overflow-hidden bg-[#f3f4f6] text-[#1f2937] font-sans relative"
     >
       {/* Storage Warning Banner (>80%) */}
+      {folderImportStatus && (
+        <div className="bg-blue-600 text-white text-xs px-4 py-2 shadow-md z-40">{folderImportStatus}</div>
+      )}
       {storageWarning && (
         <div
           id="storage-warning-banner"
@@ -1646,6 +1748,7 @@ export default function App() {
         storageInfo={storageInfo}
         onToggleSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
         onAddImage={handleAddImageClick}
+        onAddFolder={() => folderInputRef.current?.click()}
         onClearAll={handleClearAll}
         onExportProject={handleExportProject}
         onImportProject={handleImportProjectClick}
@@ -1690,6 +1793,7 @@ export default function App() {
 
         <Canvas
           project={activeProject}
+          onAddFolder={handleAddFolder}
           selectedCardIds={selectedCardIds}
           selectedNoteIds={selectedNoteIds}
           pan={activeProject.pan || { x: 80, y: 80 }}
@@ -1760,6 +1864,15 @@ export default function App() {
         accept="image/*,.heic,.heif"
         multiple
         onChange={handleFileInputChange}
+        className="hidden"
+      />
+      <input
+        type="file"
+        ref={folderInputRef}
+        id="hidden-folder-input"
+        multiple
+        {...({ webkitdirectory: '' } as Record<string, string>)}
+        onChange={handleFolderInputChange}
         className="hidden"
       />
       <input

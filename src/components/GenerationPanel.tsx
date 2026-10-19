@@ -31,6 +31,8 @@ export interface GenerationOptions {
   isProductReplacement?: boolean;
   selectedProduct?: ProductItem;
   masterPromptName?: string;
+  /** What the selected photos are: the product to keep, or an example of the style to copy */
+  photoRole?: 'product' | 'style';
 }
 
 interface GenerationPanelProps {
@@ -77,6 +79,7 @@ export function GenerationPanel({
   const [activeTab, setActiveTab] = useState<'single' | 'batch'>('single');
   const [prompt, setPrompt] = useState('');
   const [selectedMasterPromptId, setSelectedMasterPromptId] = useState('');
+  const [photoRole, setPhotoRole] = useState<'product' | 'style'>('product');
   const [isProductReplacementMode, setIsProductReplacementMode] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [selectedBatchProductIds, setSelectedBatchProductIds] = useState<Set<string>>(new Set());
@@ -258,6 +261,7 @@ export function GenerationPanel({
       onGenerate(prompt, {
         isProductReplacement: false,
         masterPromptName: usedMasterPromptName(),
+        photoRole,
       });
     }
   };
@@ -473,17 +477,37 @@ export function GenerationPanel({
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1 text-gray-500">
                 <span className="font-semibold text-gray-700">
-                  Стиль с этих фото ({selectedCards.length}/5)
+                  Выделенные фото ({selectedCards.length}/5)
                 </span>
-                <span className="text-gray-400 text-[10px]">
-                  {selectedCards.length === 0 ? 'выделите фото на доске' : 'свет, фон, цвет и ракурс'}
-                </span>
+                {!isProductReplacementMode && (
+                  <div className="flex items-center gap-0.5 p-0.5 bg-gray-100 rounded-lg">
+                    {(['product', 'style'] as const).map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setPhotoRole(r)}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-medium cursor-pointer ${
+                          photoRole === r ? 'bg-white text-gray-900 shadow-2xs' : 'text-gray-500 hover:text-gray-800'
+                        }`}
+                      >
+                        {r === 'product' ? 'это продукт' : 'это пример стиля'}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
+              <p className="text-[10px] text-gray-400 mb-1 leading-snug">
+                {isProductReplacementMode
+                  ? 'С них берутся сцена, свет и фон; продукт — из библиотеки.'
+                  : photoRole === 'product'
+                  ? 'Продукт остаётся как есть, а сцену, свет и фон задаёт промпт или мастер-промпт.'
+                  : 'С них берутся свет, фон, цвет и ракурс; что изобразить — пишешь в промпте.'}
+              </p>
 
               {selectedCards.length === 0 ? (
                 <div className="py-2.5 px-3 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex items-center justify-center gap-2 text-xs text-gray-500">
                   <ImageIcon className="w-4 h-4 text-gray-400" />
-                  <span className="text-[11px]">Выделите на доске 1–5 фото: с них возьмутся свет, фон, цвет и ракурс</span>
+                  <span className="text-[11px]">Выдели на доске 1–5 фото (Shift+клик или рамкой)</span>
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5 overflow-x-auto p-1.5 bg-gray-50 border border-gray-200 rounded-xl custom-scrollbar">

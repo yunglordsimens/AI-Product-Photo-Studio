@@ -372,6 +372,7 @@ export async function generateImageWithGemini(
     productImageDataUrl?: string;
     isProductReplacement?: boolean;
     customPromptOverride?: string;
+    photoRole?: 'product' | 'style';
     temperature?: number;
     aspectRatio?: string;
     model?: string;
@@ -389,6 +390,10 @@ export async function generateImageWithGemini(
     promptText = options.customPromptOverride.trim();
   } else if (options?.isProductReplacement) {
     promptText = `Замени продукт на фотографии на такой же, но в стиле приложенных референсов. Сохрани форму, цвет и текстуру продукта. ${userPrompt || ''}`.trim();
+  } else if (options?.photoRole === 'product' && referenceCards.length > 0) {
+    promptText =
+      'На приложенных фото — продукт клиента. Сохрани его точно: форма, пропорции, цвет, материал, надписи и логотип без изменений, ничего не придумывай на самом продукте. ' +
+      `Новую сцену, свет, фон и ракурс сделай так: ${userPrompt || 'чистая студийная предметная съёмка'}`;
   } else {
     promptText = `Сгенерируй изображение в стиле приложенных референсов. ${userPrompt || ''}`.trim();
   }
@@ -441,7 +446,7 @@ export async function generateImageWithGemini(
       },
     ],
     generationConfig: {
-      temperature: options?.temperature ?? (isSourceFix ? 0.2 : 0.9),
+      temperature: options?.temperature ?? (isSourceFix ? 0.2 : options?.photoRole === 'product' ? 0.5 : 0.9),
       topP: 0.95,
       topK: 40,
       maxOutputTokens: 8192,

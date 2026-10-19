@@ -3,7 +3,50 @@ import { X, Plus, Trash2, Upload, Image as ImageIcon, Save, Check, PlusCircle, C
 import { ProductItem } from '../types';
 import { compressImageDataUrl, loadGlobalProducts, saveGlobalProducts } from '../utils/storage';
 import { ImageCropModal } from './ImageCropModal';
-import { normalizeImageFiles } from '../utils/heic';
+import { normalizeImageFiles, isImageFile } from '../utils/heic';
+
+const normName = (s: string) =>
+  s
+    .normalize('NFC')
+    .toLowerCase()
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/** Names from a CSV (column "name"/"název"/"название", else first column), a JSON array, or plain lines. */
+function parseNameList(text: string, fileName: string): string[] {
+  const t = text.replace(/^\uFEFF/, '');
+  if (/\.json$/i.test(fileName)) {
+    try {
+      const data = JSON.parse(t);
+      const arr = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+      return arr.map((x: any) => (typeof x === 'string' ? x : x?.name || x?.title || '')).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+  const rows: string[][] = [];
+  for (const line of t.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const cells: string[] = [];
+    let cur = '';
+    let q = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q;
+      } else if ((ch === ',' || ch === ';' || ch === '\t') && !q) { cells.push(cur); cur = ''; }
+      else cur += ch;
+    }
+    cells.push(cur);
+    rows.push(cells.map((c) => c.trim()));
+  }
+  if (rows.length === 0) return [];
+  const header = rows[0].map((h) => h.toLowerCase());
+  const col = header.findIndex((h) => ['name', 'název', 'nazev', 'название', 'title', 'product'].includes(h));
+  if (col >= 0) return rows.slice(1).map((r) => r[col]).filter(Boolean);
+  return rows.map((r) => r[0]).filter(Boolean);
+}
 
 export { loadGlobalProducts, saveGlobalProducts };
 
@@ -32,6 +75,9 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
     productName: string;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderBatchRef = useRef<HTMLInputElement>(null);
+  const listBatchRef = useRef<HTMLInputElement>(null);
+  const [batchNote, setBatchNote] = useState<string | null>(null);
 
   useEffect(() => {
     setLocalProducts(products || []);
@@ -113,6 +159,60 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
     setCropModalState(null);
   };
 
+  // Batch: a folder of photos (file name = product name) and/or a list of names (CSV, JSON, TXT)
+
+  const commit = (next: ProductItem[]) => {
+    setLocalProducts(next);
+    onSaveProducts(next);
+    saveGlobalProducts(next);
+  };
+
+  const handleBatchPhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked: File[] = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = '';
+    const images = await normalizeImageFiles(picked.filter((f) => isImageFile(f) && !f.name.startsWith('.')));
+    if (images.length === 0) return;
+    let next = [...localProducts];
+    let added = 0;
+    let filled = 0;
+    for (let i = 0; i < images.length; i++) {
+      setBatchNote(`Фото ${i + 1} из ${images.length}…`);
+      const raw = await new Promise<string>((resolve) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result as string);
+        r.onerror = () => resolve('');
+        r.readAsDataURL(images[i]);
+      });
+      if (!raw) continue;
+      const photo = await compressImageDataUrl(raw, 1200, 0.85);
+      const name = images[i].name.replace(/\.[^.]+$/, '');
+      const idx = next.findIndex((p) => normName(p.name) === normName(name));
+      if (idx >= 0) {
+        next[idx] = { ...next[idx], photoDataUrl: photo };
+        filled++;
+      } else {
+        next.push({ id: `prod_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`, name, photoDataUrl: photo });
+        added++;
+      }
+    }
+    commit(next);
+    setBatchNote(`Готово: новых ${added}, фото добавлено к существующим ${filled}.`);
+  };
+
+  const handleBatchList = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const names = parseNameList(await file.text(), file.name);
+    const existing = new Set(localProducts.map((p) => normName(p.name)));
+    const fresh = [...new Set(names.map((n) => n.trim()))].filter((n) => n && !existing.has(normName(n)));
+    commit([
+      ...localProducts,
+      ...fresh.map((name, i) => ({ id: `prod_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`, name, photoDataUrl: '' })),
+    ]);
+    setBatchNote(`Из списка добавлено ${fresh.length} позиций. Теперь можно загрузить папку с фото — они подставятся по названию.`);
+  };
+
   const handleSave = () => {
     onSaveProducts(localProducts);
     saveGlobalProducts(localProducts);
@@ -164,6 +264,33 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
             <Plus className="w-3.5 h-3.5" />
             <span>Добавить позицию</span>
           </button>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button
+              onClick={() => folderBatchRef.current?.click()}
+              className="py-1.5 px-2 text-[11px] font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg cursor-pointer"
+              title="Каждое фото станет позицией, название — из имени файла. Если позиция с таким названием уже есть, к ней добавится фото."
+            >
+              Папка с фото
+            </button>
+            <button
+              onClick={() => listBatchRef.current?.click()}
+              className="py-1.5 px-2 text-[11px] font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg cursor-pointer"
+              title="CSV, JSON или TXT: берётся колонка name (или первая колонка / каждая строка)"
+            >
+              Список CSV / JSON
+            </button>
+          </div>
+          {batchNote && <p className="mt-2 text-[10px] text-gray-500 leading-snug">{batchNote}</p>}
+          <input
+            ref={folderBatchRef}
+            type="file"
+            multiple
+            accept="image/*,.heic,.heif"
+            className="hidden"
+            onChange={handleBatchPhotos}
+            {...({ webkitdirectory: '' } as Record<string, string>)}
+          />
+          <input ref={listBatchRef} type="file" accept=".csv,.json,.txt,text/csv,application/json,text/plain" className="hidden" onChange={handleBatchList} />
         </div>
 
         {/* Products Table / List */}

@@ -5,6 +5,7 @@ import {
   Download,
   Upload,
   Plus,
+  FolderPlus,
   FileCode,
   Sparkles,
   Settings,
@@ -30,6 +31,7 @@ interface TopBarProps {
   onToggleSidebar?: () => void;
   onOpenRightDrawer?: () => void;
   onAddImage: () => void;
+  onAddFolder?: () => void;
   onClearAll: () => void;
   onExportProject: () => void;
   onImportProject: () => void;
@@ -65,6 +67,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onToggleSidebar,
   onOpenRightDrawer,
   onAddImage,
+  onAddFolder,
   onClearAll,
   onExportProject,
   onImportProject,
@@ -92,6 +95,199 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenCatalog,
 }) => {
   const isStorageHigh = storageInfo.percentage >= 80;
+
+  // Toolbar buttons can be reordered by drag; the order is remembered in this browser
+  const [dragId, setDragId] = React.useState<string | null>(null);
+  const [toolbarOrder, setToolbarOrder] = React.useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('aips_toolbar_order') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const toolbarItems: { id: string; desktopOnly: boolean; node: React.ReactNode }[] = [
+    { id: 'photo', desktopOnly: false, node: (
+      <>
+        {/* Add Photo Button (Always visible & primary) */}
+        <button
+          id="btn-add-photos"
+          onClick={onAddImage}
+          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:scale-95 rounded-lg shadow-xs transition-all shrink-0 cursor-pointer"
+          title="Загрузить фото (одно или несколько)"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Фото</span>
+        </button>
+
+        {onAddFolder && (
+          <button
+            id="btn-add-folder"
+            onClick={onAddFolder}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-all shrink-0 cursor-pointer"
+            title="Загрузить папку: каждая подпапка станет группой на доске (папку можно и просто перетащить)"
+          >
+            <FolderPlus className="w-4 h-4" />
+            <span className="hidden sm:inline">Папка</span>
+          </button>
+        )}
+      </>
+    ) },
+    { id: 'ai', desktopOnly: false, node: (
+      <>
+        {/* AI Generation Quick Trigger */}
+        <button
+          id="btn-open-generation-panel"
+          onClick={onToggleGeneration}
+          className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg transition-colors shrink-0 cursor-pointer ${
+            isGenerationOpen
+              ? 'bg-purple-600 text-white shadow-xs'
+              : 'text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200'
+          }`}
+          title="AI Генерация карточек (G)"
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">AI (G)</span>
+          <span className="sm:hidden">AI</span>
+        </button>
+      </>
+    ) },
+    { id: 'catalog', desktopOnly: false, node: (
+      <>
+        {/* Catalog mode */}
+        {onOpenCatalog && (
+          <button
+            id="btn-open-catalog"
+            onClick={onOpenCatalog}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-gray-900 hover:bg-gray-700 border border-gray-900 rounded-lg transition-colors shrink-0 cursor-pointer"
+            title="Каталог: один стиль на все фото"
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Каталог</span>
+          </button>
+        )}
+      </>
+    ) },
+    { id: 'style', desktopOnly: true, node: (
+      <>
+          {/* Style Analysis */}
+          <button
+            id="btn-analyze-style"
+            onClick={onAnalyzeStyle}
+            disabled={isAnalyzingStyle}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors shrink-0 cursor-pointer disabled:opacity-50"
+            title="Описать стиль выделенных фото: Gemini вернёт теги (свет, фон, цвет, ракурс), их можно сохранить как мастер-промпт"
+          >
+            <Palette className={`w-3.5 h-3.5 text-indigo-600 ${isAnalyzingStyle ? 'animate-spin' : ''}`} />
+            <span className="hidden xl:inline">Стиль</span>
+          </button>
+      </>
+    ) },
+    { id: 'products', desktopOnly: true, node: (
+      <>
+          {/* Product Library */}
+          <button
+            id="btn-toggle-products-library"
+            onClick={onToggleProducts}
+            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors shrink-0 cursor-pointer ${
+              isProductsOpen
+                ? 'bg-blue-600 text-white border-blue-700 shadow-2xs'
+                : 'text-gray-700 hover:text-blue-700 bg-gray-50 hover:bg-blue-50 border-gray-200 hover:border-blue-200'
+            }`}
+            title="Библиотека продуктов"
+          >
+            <Package className="w-3.5 h-3.5 text-blue-500" />
+            <span className="hidden xl:inline">Продукты</span>
+          </button>
+      </>
+    ) },
+    { id: 'prompts', desktopOnly: true, node: (
+      <>
+          {/* Master Prompts */}
+          <button
+            id="btn-topbar-master-prompts"
+            onClick={onOpenMasterPrompts}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg transition-colors shrink-0 cursor-pointer"
+            title="Мастер-промпты"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-purple-600" />
+            <span className="hidden xl:inline">Промпты</span>
+          </button>
+      </>
+    ) },
+    { id: 'group', desktopOnly: true, node: (
+      <>
+          {/* Group */}
+          {canGroup && onGroupSelected && (
+            <button
+              id="btn-group-selected-cards"
+              onClick={onGroupSelected}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 rounded-lg transition-colors shrink-0"
+              title="Сгруппировать выделенные карточки"
+            >
+              <Layers className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Группа</span>
+            </button>
+          )}
+      </>
+    ) },
+    { id: 'links', desktopOnly: true, node: (
+      <>
+          {/* Connection Mode */}
+          <button
+            id="btn-toggle-connection-mode"
+            onClick={onToggleConnectionMode}
+            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-all shrink-0 cursor-pointer ${
+              isConnectionMode
+                ? 'bg-blue-600 text-white border-blue-700 shadow-xs ring-2 ring-blue-300'
+                : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200'
+            }`}
+            title="Режим связей (L)"
+          >
+            <Link2 className="w-3.5 h-3.5" />
+            <span className="hidden xl:inline">Связи (L)</span>
+          </button>
+      </>
+    ) },
+    { id: 'mockup', desktopOnly: true, node: (
+      <>
+          {/* Site mockup behind the canvas */}
+          {onAddSiteMockup && (
+            <button
+              id="btn-topbar-site-mockup"
+              onClick={onAddSiteMockup}
+              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-all shrink-0 cursor-pointer ${
+                hasSiteMockup
+                  ? 'bg-teal-50 text-teal-800 border-teal-300'
+                  : 'bg-white hover:bg-teal-50 text-teal-700 border-teal-200'
+              }`}
+              title="Положить под доску скриншот сайта клиента и смотреть, как фото встанут на страницу"
+            >
+              <Monitor className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline">Макет сайта</span>
+            </button>
+          )}
+      </>
+    ) },
+  ];
+
+  const orderedToolbar = [...toolbarItems].sort((a, b) => {
+    const ia = toolbarOrder.indexOf(a.id);
+    const ib = toolbarOrder.indexOf(b.id);
+    return (ia < 0 ? 100 + toolbarItems.indexOf(a) : ia) - (ib < 0 ? 100 + toolbarItems.indexOf(b) : ib);
+  });
+  const moveToolbarItem = (fromId: string, toId: string) => {
+    const ids = orderedToolbar.map((i) => i.id);
+    const from = ids.indexOf(fromId);
+    const to = ids.indexOf(toId);
+    if (from < 0 || to < 0) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    setToolbarOrder(ids);
+    try {
+      localStorage.setItem('aips_toolbar_order', JSON.stringify(ids));
+    } catch {
+      /* private mode */
+    }
+  };
 
   return (
     <header
@@ -137,131 +333,31 @@ export const TopBar: React.FC<TopBarProps> = ({
 
       {/* Main Quick Action Buttons */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-        {/* Add Photo Button (Always visible & primary) */}
-        <button
-          id="btn-add-photos"
-          onClick={onAddImage}
-          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:scale-95 rounded-lg shadow-xs transition-all shrink-0 cursor-pointer"
-          title="Загрузить фото (одно или несколько)"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Фото</span>
-        </button>
-
-        {/* AI Generation Quick Trigger */}
-        <button
-          id="btn-open-generation-panel"
-          onClick={onToggleGeneration}
-          className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg transition-colors shrink-0 cursor-pointer ${
-            isGenerationOpen
-              ? 'bg-purple-600 text-white shadow-xs'
-              : 'text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200'
-          }`}
-          title="AI Генерация карточек (G)"
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">AI (G)</span>
-          <span className="sm:hidden">AI</span>
-        </button>
-
-        {/* Catalog mode */}
-        {onOpenCatalog && (
-          <button
-            id="btn-open-catalog"
-            onClick={onOpenCatalog}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-gray-900 hover:bg-gray-700 border border-gray-900 rounded-lg transition-colors shrink-0 cursor-pointer"
-            title="Каталог: один стиль на все фото"
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Каталог</span>
-          </button>
-        )}
-
-        {/* Desktop-only Direct Tools */}
-        <div className="hidden lg:flex items-center gap-1 sm:gap-1.5">
-          {/* Style Analysis */}
-          <button
-            id="btn-analyze-style"
-            onClick={onAnalyzeStyle}
-            disabled={isAnalyzingStyle}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors shrink-0 cursor-pointer disabled:opacity-50"
-            title="Описать стиль выделенных фото: Gemini вернёт теги (свет, фон, цвет, ракурс), их можно сохранить как мастер-промпт"
-          >
-            <Palette className={`w-3.5 h-3.5 text-indigo-600 ${isAnalyzingStyle ? 'animate-spin' : ''}`} />
-            <span className="hidden xl:inline">Стиль</span>
-          </button>
-
-          {/* Product Library */}
-          <button
-            id="btn-toggle-products-library"
-            onClick={onToggleProducts}
-            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors shrink-0 cursor-pointer ${
-              isProductsOpen
-                ? 'bg-blue-600 text-white border-blue-700 shadow-2xs'
-                : 'text-gray-700 hover:text-blue-700 bg-gray-50 hover:bg-blue-50 border-gray-200 hover:border-blue-200'
+        {orderedToolbar.map((item) => (
+          <div
+            key={item.id}
+            draggable
+            onDragStart={(e) => {
+              setDragId(item.id);
+              e.dataTransfer.effectAllowed = 'move';
+            }}
+            onDragOver={(e) => {
+              if (dragId && dragId !== item.id) e.preventDefault();
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragId) moveToolbarItem(dragId, item.id);
+              setDragId(null);
+            }}
+            onDragEnd={() => setDragId(null)}
+            className={`${item.desktopOnly ? 'hidden lg:flex' : 'flex'} items-center gap-1 sm:gap-1.5 ${
+              dragId === item.id ? 'opacity-40' : ''
             }`}
-            title="Библиотека продуктов"
+            title="Перетащи, чтобы поменять порядок кнопок"
           >
-            <Package className="w-3.5 h-3.5 text-blue-500" />
-            <span className="hidden xl:inline">Продукты</span>
-          </button>
-
-          {/* Master Prompts */}
-          <button
-            id="btn-topbar-master-prompts"
-            onClick={onOpenMasterPrompts}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg transition-colors shrink-0 cursor-pointer"
-            title="Мастер-промпты"
-          >
-            <BookOpen className="w-3.5 h-3.5 text-purple-600" />
-            <span className="hidden xl:inline">Промпты</span>
-          </button>
-
-          {/* Group */}
-          {canGroup && onGroupSelected && (
-            <button
-              id="btn-group-selected-cards"
-              onClick={onGroupSelected}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 rounded-lg transition-colors shrink-0"
-              title="Сгруппировать выделенные карточки"
-            >
-              <Layers className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Группа</span>
-            </button>
-          )}
-
-          {/* Connection Mode */}
-          <button
-            id="btn-toggle-connection-mode"
-            onClick={onToggleConnectionMode}
-            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-all shrink-0 cursor-pointer ${
-              isConnectionMode
-                ? 'bg-blue-600 text-white border-blue-700 shadow-xs ring-2 ring-blue-300'
-                : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200'
-            }`}
-            title="Режим связей (L)"
-          >
-            <Link2 className="w-3.5 h-3.5" />
-            <span className="hidden xl:inline">Связи (L)</span>
-          </button>
-
-          {/* Site mockup behind the canvas */}
-          {onAddSiteMockup && (
-            <button
-              id="btn-topbar-site-mockup"
-              onClick={onAddSiteMockup}
-              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-all shrink-0 cursor-pointer ${
-                hasSiteMockup
-                  ? 'bg-teal-50 text-teal-800 border-teal-300'
-                  : 'bg-white hover:bg-teal-50 text-teal-700 border-teal-200'
-              }`}
-              title="Положить под доску скриншот сайта клиента и смотреть, как фото встанут на страницу"
-            >
-              <Monitor className="w-3.5 h-3.5" />
-              <span className="hidden xl:inline">Макет сайта</span>
-            </button>
-          )}
-        </div>
+            {item.node}
+          </div>
+        ))}
 
         {/* Desktop-only Quick Right Actions */}
         <div className="hidden lg:flex items-center gap-1 sm:gap-1.5">

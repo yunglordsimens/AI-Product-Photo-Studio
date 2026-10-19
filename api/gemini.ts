@@ -43,7 +43,12 @@ export default async function handler(req: Req, res: Res) {
   const apiKey = process.env.GEMINI_API_KEY;
   const studioPassword = process.env.STUDIO_PASSWORD;
   if (!apiKey || !studioPassword) {
-    res.status(500).json({ error: { message: 'Server is not configured: set GEMINI_API_KEY and STUDIO_PASSWORD' } });
+    const missing = [!apiKey && 'GEMINI_API_KEY', !studioPassword && 'STUDIO_PASSWORD'].filter(Boolean).join(' и ');
+    res.status(500).json({
+      error: {
+        message: `На сервере пустая переменная ${missing}. Vercel → проект → Settings → Environment Variables: впиши значение, сохрани и сделай Redeploy. Пока можно вставить личный ключ в настройках студии.`,
+      },
+    });
     return;
   }
 
