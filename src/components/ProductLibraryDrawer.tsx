@@ -479,9 +479,24 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
       return next;
     });
 
-  // ⌘G inside the panel (hovered or focused) groups the ticked rows; the board's ⌘G is left alone then
+  // ⌘G inside the panel (hovered or focused) groups the ticked rows; the board's ⌘G is left alone then.
+  // Delete / Backspace removes the ticked rows (not while typing in a field).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const panel = panelRef.current;
+        const t = e.target as HTMLElement;
+        if (!panel || selectedIds.size === 0) return;
+        if (t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'checkbox') return;
+        if (t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable) return;
+        if (!(panel.matches(':hover') || panel.contains(document.activeElement))) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (!window.confirm(`Удалить выбранные позиции (${selectedIds.size})?`)) return;
+        commit(localProducts.filter((p) => !selectedIds.has(p.id)));
+        setSelectedIds(new Set());
+        return;
+      }
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'g' || e.shiftKey) return;
       const panel = panelRef.current;
       if (!panel || !(panel.matches(':hover') || panel.contains(document.activeElement))) return;
@@ -492,7 +507,8 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [selectedIds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIds, localProducts]);
 
   if (!isOpen) return null;
 
@@ -649,7 +665,7 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
               }}
               className="ml-3 underline text-[var(--fg)] hover:bg-[var(--marker)] cursor-pointer"
             >
-              удалить выбранные
+              удалить выбранные (Del)
             </button>
           )}
           {selectedIds.size > 0 && onMoveToProject && otherProjects.length > 0 && (

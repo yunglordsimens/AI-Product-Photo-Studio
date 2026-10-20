@@ -542,7 +542,8 @@ export async function optimizeAllProjectsMemory(): Promise<{
       for (const card of proj.cards) {
         if (card.src && card.src.startsWith('data:image/')) {
           const originalSrc = card.src;
-          const compressed = await compressImageDataUrl(originalSrc, 800, 0.8);
+          // Same size limit as on import (1600 px), only a lighter JPEG: frees space without making photos smaller
+          const compressed = await compressImageDataUrl(originalSrc, 1600, 0.8);
           if (compressed !== originalSrc && compressed.length < originalSrc.length) {
             card.src = compressed;
             optimizedCards++;

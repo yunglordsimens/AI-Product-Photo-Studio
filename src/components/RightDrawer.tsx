@@ -152,8 +152,13 @@ export const RightDrawer: React.FC<RightDrawerProps> = ({
             <button onClick={act(onOpenSettings)} className={row}>
               <span>Доступ и модель</span>
             </button>
-            <button onClick={act(onOptimizeMemory)} disabled={isOptimizing} className={row}>
-              <span>{isOptimizing ? 'Сжимаю картинки…' : 'Сжать картинки'}</span>
+            <button
+              onClick={act(onOptimizeMemory)}
+              disabled={isOptimizing}
+              className={row}
+              title="Пересохраняет все фото проектов чуть легче, чтобы освободить память браузера. Нужно, только если память почти заполнена"
+            >
+              <span>{isOptimizing ? 'Сжимаю фото…' : 'Освободить память (сжать фото)'}</span>
             </button>
             <button onClick={act(onClearAll)} className={`${row} hover:!bg-[var(--marker)]`}>
               <span>Очистить доску проекта</span>

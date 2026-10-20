@@ -24,6 +24,7 @@ import {
 } from '../utils/catalog';
 import { buildZip, dataUrlToBytes, downloadBlob } from '../utils/zip';
 import { groupPrompts } from '../utils/promptCategories';
+import { fileSafe } from '../utils/positionsExport';
 import { isImageFile, normalizeImageFiles } from '../utils/heic';
 
 interface CatalogStudioProps {
@@ -429,13 +430,14 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
       setNotice({ kind: 'info', text: 'В этой версии ещё нет готовых фото.' });
       return;
     }
+    // Files are named exactly like the positions (diacritics and spaces kept), so they can be swapped in by name
     const used = new Map<string, number>();
     const entries = picked.map(({ it, r }) => {
       const { bytes, ext } = dataUrlToBytes(r!.src!);
-      const base = slugify(it.name);
-      const n = (used.get(base) || 0) + 1;
-      used.set(base, n);
-      return { name: `${n > 1 ? `${base}-${n}` : base}.${ext}`, data: bytes };
+      const base = fileSafe(it.name);
+      const n = (used.get(base.toLowerCase()) || 0) + 1;
+      used.set(base.toLowerCase(), n);
+      return { name: `${n > 1 ? `${base} ${n}` : base}.${ext}`, data: bytes };
     });
     downloadBlob(buildZip(entries), `${slugify(projectName)}-catalog-${activeVersion.label}.zip`);
   };

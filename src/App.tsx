@@ -1760,7 +1760,7 @@ export default function App() {
         setStorageWarning(null);
       }
       if (parseFloat(res.freedMb) > 0 || res.freedBytes > 0) {
-        window.alert(`Освобождено ${res.freedMb} MB (${res.optimizedCards} изображений сжато до 500px)`);
+        window.alert(`Освобождено ${res.freedMb} MB (${res.optimizedCards} фото пересохранено легче)`);
       } else {
         window.alert('Все изображения уже оптимизированы (до 500px, quality 0.7). Освобождено 0.00 MB');
       }

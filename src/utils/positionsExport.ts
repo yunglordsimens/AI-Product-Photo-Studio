@@ -31,7 +31,7 @@ export function finalPhoto(p: ProductItem): string {
 }
 
 /** Keeps the name readable (diacritics, spaces) but safe as a file name everywhere. */
-function fileSafe(name: string): string {
+export function fileSafe(name: string): string {
   return (name.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'item').slice(0, 120);
 }
 
