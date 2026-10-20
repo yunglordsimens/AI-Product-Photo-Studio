@@ -687,6 +687,64 @@ export function saveMasterPrompts(prompts: MasterPrompt[]): boolean {
   return true;
 }
 
+// ---- Positions (products), one list per project ----
+// Until Oct 21, 2026 one list was shared by all projects (key aips_products_library). On first run it
+// moves into the project it belongs to (by name, else the active one) and the old list is kept as a backup.
+
+const productsKey = (projectId: string) => `aips_products_${projectId}`;
+const PRODUCTS_SPLIT_FLAG = 'aips_products_split_v1';
+const productsCache = new Map<string, ProductItem[]>();
+const productsLoaded = new Set<string>();
+
+/** Moves the old shared list into one project, once. */
+async function splitSharedProductsOnce(projects: Project[], activeId: string): Promise<void> {
+  try {
+    if (localStorage.getItem(PRODUCTS_SPLIT_FLAG)) return;
+  } catch {
+    return;
+  }
+  const shared = await idbGet<ProductItem[]>(STORAGE_KEY_GLOBAL_PRODUCTS);
+  if (shared && Array.isArray(shared) && shared.length > 0) {
+    const owner =
+      projects.find((p) => /oryza|орыз|арыз|lit[ií]/i.test(p.name)) || projects.find((p) => p.id === activeId) || projects[0];
+    if (owner) {
+      const existing = (await idbGet<ProductItem[]>(productsKey(owner.id))) || [];
+      if (existing.length === 0) await idbSet(productsKey(owner.id), shared);
+      await idbSet(`${STORAGE_KEY_GLOBAL_PRODUCTS}_backup`, shared);
+    }
+  }
+  try {
+    localStorage.setItem(PRODUCTS_SPLIT_FLAG, '1');
+  } catch {}
+}
+
+export async function loadProjectProducts(projectId: string, projects: Project[]): Promise<ProductItem[]> {
+  await splitSharedProductsOnce(projects, projectId);
+  if (productsCache.has(projectId) && productsLoaded.has(projectId)) return productsCache.get(projectId)!;
+  const list = (await idbGet<ProductItem[]>(productsKey(projectId))) || [];
+  // Anything saved for this project while it was loading wins over the stored list
+  const pending = productsCache.get(projectId);
+  const result = pending && !productsLoaded.has(projectId) && pending.length ? pending : list;
+  productsCache.set(projectId, result);
+  productsLoaded.add(projectId);
+  if (result !== list) await idbSet(productsKey(projectId), result);
+  return result;
+}
+
+export function saveProjectProducts(projectId: string, products: ProductItem[]): void {
+  productsCache.set(projectId, products);
+  inMemoryProductsCache = products;
+  // Never write before this project's stored list was read once
+  if (!productsLoaded.has(projectId)) return;
+  idbSet(productsKey(projectId), products).catch((err) => console.error('Failed to save positions:', err));
+}
+
+/** Appends positions to another project's list (used by «перенести в проект…»). */
+export async function appendProductsToProject(projectId: string, items: ProductItem[], projects: Project[]): Promise<void> {
+  const list = await loadProjectProducts(projectId, projects);
+  saveProjectProducts(projectId, [...list, ...items]);
+}
+
 // Global Products Persistence
 export async function loadGlobalProductsAsync(): Promise<ProductItem[]> {
   try {

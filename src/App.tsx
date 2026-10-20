@@ -27,7 +27,9 @@ import {
   loadMasterPrompts,
   loadMasterPromptsAsync,
   saveMasterPrompts,
-  loadGlobalProductsAsync,
+  loadProjectProducts,
+  saveProjectProducts,
+  appendProductsToProject,
   requestPersistentStorage,
 } from './utils/storage';
 import { compressAndLoadImage, compressDataUrl, createSampleCard } from './utils/imageUtils';
@@ -35,7 +37,8 @@ import { getStoredApiKey, hasGenerationAccess, generateImageWithGemini, analyzeS
 import { SOURCE_FIX_MARKER } from './utils/storage';
 import { isImageFile, normalizeImageFiles } from './utils/heic';
 import { FolderFile, groupByFolder, folderFilesFromInput } from './utils/folderImport';
-import { TopBar, TOOL_LABELS } from './components/TopBar';
+import { TopBar, TOOL_LABELS, StudioView } from './components/TopBar';
+import { VideoTab } from './components/VideoTab';
 import { Sidebar } from './components/Sidebar';
 import { Canvas } from './components/Canvas';
 import { ShortcutsModal } from './components/ShortcutsModal';
@@ -45,7 +48,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { GenerationPanel, ConsideredNoteInfo } from './components/GenerationPanel';
 import { MasterPromptsModal } from './components/MasterPromptsModal';
 import { StyleAnalysisModal } from './components/StyleAnalysisModal';
-import { ProductLibraryDrawer, loadGlobalProducts, saveGlobalProducts } from './components/ProductLibraryDrawer';
+import { ProductLibraryDrawer } from './components/ProductLibraryDrawer';
 import { compressImageDataUrl } from './utils/storage';
 import { ImageCropModal, CropAspectRatio, cropRatioValue } from './components/ImageCropModal';
 import { RightDrawer } from './components/RightDrawer';
@@ -104,6 +107,7 @@ export default function App() {
 
   // Product Library State (localStorage 'aips_products')
   const [productsList, setProductsList] = useState<ProductItem[]>([]);
+  const [isHydrated, setIsHydrated] = useState(false);
   const [isProductLibraryOpen, setIsProductLibraryOpen] = useState(false);
 
   // Canvas Image Crop Queue State
@@ -118,7 +122,21 @@ export default function App() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isGenerationOpen, setIsGenerationOpen] = useState(false);
-  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
+  // Tabs: the board, the catalog conveyor, video
+  const [studioView, setStudioViewState] = useState<StudioView>(() => {
+    try {
+      const v = localStorage.getItem('aips_view');
+      return v === 'catalog' || v === 'video' ? v : 'board';
+    } catch {
+      return 'board';
+    }
+  });
+  const setStudioView = useCallback((v: StudioView) => {
+    setStudioViewState(v);
+    try {
+      localStorage.setItem('aips_view', v);
+    } catch {}
+  }, []);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [previewCard, setPreviewCard] = useState<Card | null>(null);
@@ -230,7 +248,6 @@ export default function App() {
     const activeId = getActiveProjectId(fastProjects);
     setActiveProjectIdState(activeId);
     setMasterPrompts(loadMasterPrompts());
-    setProductsList(loadGlobalProducts());
     setStorageInfo(getStorageUsage());
 
     // Ask the browser to keep the studio's data even when the disk fills up
@@ -240,10 +257,9 @@ export default function App() {
     let isMounted = true;
     (async () => {
       try {
-        const [asyncProjects, asyncPrompts, asyncProducts, asyncStorage] = await Promise.all([
+        const [asyncProjects, asyncPrompts, asyncStorage] = await Promise.all([
           loadProjectsAsync(),
           loadMasterPromptsAsync(),
-          loadGlobalProductsAsync(),
           getStorageUsageAsync(),
         ]);
         if (isMounted) {
@@ -255,9 +271,7 @@ export default function App() {
           if (asyncPrompts && asyncPrompts.length > 0) {
             setMasterPrompts(asyncPrompts);
           }
-          if (asyncProducts) {
-            setProductsList(asyncProducts);
-          }
+          setIsHydrated(true);
           if (asyncStorage) {
             setStorageInfo(asyncStorage);
           }
@@ -679,12 +693,12 @@ export default function App() {
       }
       setFolderImportStatus(null);
       setProductsList(next);
-      saveGlobalProducts(next);
+      saveProjectProducts(activeProjectId, next);
       setFolderImportStatus(`Продукты: добавлено ${added}, фото обновлено у ${filled}.`);
       setTimeout(() => setFolderImportStatus(null), 6000);
       setIsProductLibraryOpen(true);
     },
-    [productsList]
+    [productsList, activeProjectId]
   );
 
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -1758,11 +1772,40 @@ export default function App() {
     }
   }, []);
 
-  // Save Products
-  const handleSaveProducts = useCallback((newProducts: ProductItem[]) => {
-    setProductsList(newProducts);
-    saveGlobalProducts(newProducts);
-  }, []);
+  // Positions belong to the active project: load them whenever the project changes
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+  useEffect(() => {
+    if (!isHydrated || !activeProjectId) return;
+    let alive = true;
+    setProductsList([]);
+    loadProjectProducts(activeProjectId, projectsRef.current).then((list) => {
+      if (alive) setProductsList(list);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [activeProjectId, isHydrated]);
+
+  // Save positions of the active project
+  const handleSaveProducts = useCallback(
+    (newProducts: ProductItem[]) => {
+      setProductsList(newProducts);
+      saveProjectProducts(activeProjectId, newProducts);
+    },
+    [activeProjectId]
+  );
+
+  // «перенести в проект…»: the ticked positions leave this project and join another one
+  const handleMoveProductsToProject = useCallback(
+    async (ids: string[], targetProjectId: string) => {
+      if (!targetProjectId || targetProjectId === activeProjectId) return;
+      const moving = productsList.filter((p) => ids.includes(p.id));
+      await appendProductsToProject(targetProjectId, moving, projects);
+      handleSaveProducts(productsList.filter((p) => !ids.includes(p.id)));
+    },
+    [activeProjectId, productsList, projects, handleSaveProducts]
+  );
 
   // Add product photo from library to canvas
   const handleAddProductToCanvas = useCallback(
@@ -2151,7 +2194,8 @@ export default function App() {
         onOpenRightDrawer={() => setIsRightDrawerOpen((v) => !v)}
         isMenuOpen={isRightDrawerOpen}
         hiddenTools={hiddenTools}
-        onOpenCatalog={() => setIsCatalogOpen(true)}
+        view={studioView}
+        onChangeView={setStudioView}
       />
 
       {/* Main Workspace: Sidebar + Infinite Canvas */}
@@ -2172,6 +2216,7 @@ export default function App() {
           onRenameProject={handleRenameProject}
         />
 
+        <div className="relative flex-1 min-w-0 flex">
         <Canvas
           project={activeProject}
           onAddFolder={askAboutFolder}
@@ -2214,6 +2259,23 @@ export default function App() {
           onDeleteSiteMockup={handleDeleteSiteMockup}
           onChangeSiteMockupOpacity={handleChangeSiteMockupOpacity}
         />
+
+        {studioView === 'catalog' && (
+          <CatalogStudio
+            isOpen={true}
+            onClose={() => setStudioView('board')}
+            projectId={activeProject.id}
+            projectName={activeProject.name}
+            products={productsList}
+            selectedCards={selectedCardsList}
+            boardCards={activeProject.cards || []}
+            masterPrompts={masterPrompts}
+            onSaveMasterPrompts={handleSaveMasterPrompts}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+          />
+        )}
+        {studioView === 'video' && <VideoTab projectName={activeProject.name} />}
+        </div>
       </div>
 
 
@@ -2244,6 +2306,8 @@ export default function App() {
                   onSaveProducts={handleSaveProducts}
                   onAddProductToCanvas={handleAddProductToCanvas}
                   projectName={activeProject.name}
+                  otherProjects={projects.filter((p) => p.id !== activeProjectId).map((p) => ({ id: p.id, name: p.name }))}
+                  onMoveToProject={handleMoveProductsToProject}
                 />
               )}
               {id === 'ai' && (
@@ -2392,15 +2456,6 @@ export default function App() {
       />
 
 
-      <CatalogStudio
-        isOpen={isCatalogOpen}
-        onClose={() => setIsCatalogOpen(false)}
-        projectId={activeProject.id}
-        projectName={activeProject.name}
-        products={productsList}
-        selectedCards={selectedCardsList}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-      />
 
       {/* Image Crop Modal for Canvas Uploads / Drops */}
       {canvasCropQueue.length > 0 && canvasCropIndex < canvasCropQueue.length && (

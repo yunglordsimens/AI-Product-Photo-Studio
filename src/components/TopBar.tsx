@@ -2,10 +2,18 @@ import React from 'react';
 import { StorageInfo } from '../types';
 
 /** Names of the top-bar tools, as shown in Меню → «Кнопки сверху» */
+export type StudioView = 'board' | 'catalog' | 'video';
+const VIEWS: { id: StudioView; label: string }[] = [
+  { id: 'board', label: 'Доска' },
+  { id: 'catalog', label: 'Каталог' },
+  { id: 'video', label: 'Видео' },
+];
+/** Board-only tools are hidden on the other tabs */
+const ALWAYS_TOOLS = new Set(['products', 'prompts']);
+
 export const TOOL_LABELS: { id: string; label: string }[] = [
   { id: 'photo', label: 'Фото / папка' },
   { id: 'ai', label: 'AI' },
-  { id: 'catalog', label: 'Каталог' },
   { id: 'style', label: 'Стиль' },
   { id: 'products', label: 'Продукты' },
   { id: 'prompts', label: 'Промпты' },
@@ -55,6 +63,8 @@ interface TopBarProps {
   isSidebarCollapsed?: boolean;
   /** The selection is exactly one group: the «Группа» cell then ungroups it */
   onUngroupSelected?: () => void;
+  view?: StudioView;
+  onChangeView?: (view: StudioView) => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -68,6 +78,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   isMenuOpen = false,
   isSidebarCollapsed = false,
   onUngroupSelected,
+  view = 'board',
+  onChangeView,
   onAddImage,
   onAddFolder,
   onClearAll,
@@ -149,11 +161,6 @@ export const TopBar: React.FC<TopBarProps> = ({
         AI
       </button>
     ) },
-    { id: 'catalog', desktopOnly: false, node: onOpenCatalog && (
-      <button id="btn-open-catalog" onClick={onOpenCatalog} className={cell()} title="Каталог: один стиль на все фото">
-        Каталог
-      </button>
-    ) },
     { id: 'style', desktopOnly: true, node: (
       <button
         id="btn-analyze-style"
@@ -203,7 +210,10 @@ export const TopBar: React.FC<TopBarProps> = ({
   ];
 
   const visibleToolbar = toolbarItems.filter(
-    (i) => !hiddenTools.includes(i.id) && (i.id !== 'group' || (canGroup && onGroupSelected))
+    (i) =>
+      !hiddenTools.includes(i.id) &&
+      (view === 'board' || ALWAYS_TOOLS.has(i.id)) &&
+      (i.id !== 'group' || (canGroup && onGroupSelected))
   );
   const orderedToolbar = [...visibleToolbar].sort((a, b) => {
     const ia = toolbarOrder.indexOf(a.id);
@@ -257,11 +267,26 @@ export const TopBar: React.FC<TopBarProps> = ({
           </button>
         )}
         <span className="hidden sm:inline font-semibold tracking-[.02em] shrink-0">OFST Photo</span>
-        <span className="hidden sm:inline truncate text-[var(--grey)]">
+        {/* Tabs: the board, the catalog conveyor, video (to come) */}
+        {onChangeView && (
+          <nav className="flex shrink-0 self-center" aria-label="Режим">
+            {VIEWS.map((v) => (
+              <button
+                key={v.id}
+                onClick={() => onChangeView(v.id)}
+                className={`ofst-cell ${view === v.id ? 'is-on' : 'ofst-cell--muted'}`}
+                aria-current={view === v.id ? 'page' : undefined}
+              >
+                {v.label}
+              </button>
+            ))}
+          </nav>
+        )}
+        <span className="hidden lg:inline truncate text-[var(--grey)]">
           {projectName} · {cardCount} фото
           {selectedCount > 0 && <span className="ml-1 text-[var(--fg)]">· выбрано {selectedCount}</span>}
         </span>
-        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.10 · 21.10</span>
+        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.11 · 21.10</span>
       </div>
 
       {/* Tools: text cells, reorderable by drag */}

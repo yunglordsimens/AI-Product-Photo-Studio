@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { ProductItem } from '../types';
-import { compressImageDataUrl, loadGlobalProducts, saveGlobalProducts } from '../utils/storage';
+import { compressImageDataUrl } from '../utils/storage';
 import { ImageCropModal } from './ImageCropModal';
 import { normalizeImageFiles, isImageFile } from '../utils/heic';
 import { PRODUCT_DRAG_TYPE } from '../utils/dragTypes';
@@ -16,7 +16,8 @@ const Slot: React.FC<{
   dragRef: SlotRef;
   onPick: () => void;
   onMarkFinal: () => void;
-}> = ({ src, label, isFinal, dragRef, onPick, onMarkFinal }) => (
+  onDelete: () => void;
+}> = ({ src, label, isFinal, dragRef, onPick, onMarkFinal, onDelete }) => (
   <div className={`relative w-[104px] h-[104px] bg-[var(--soft)] group/slot ${isFinal && src ? 'ofst-outline' : ''}`}>
     {src ? (
       <img
@@ -46,13 +47,14 @@ const Slot: React.FC<{
         >
           ★
         </button>
-        <button
-          onClick={onPick}
-          className="absolute bottom-0 right-0 px-1 text-[10px] bg-white opacity-0 group-hover/slot:opacity-100 cursor-pointer"
-          title="Заменить"
-        >
-          заменить
-        </button>
+        <span className="absolute bottom-0 left-0 right-0 flex justify-between opacity-0 group-hover/slot:opacity-100 text-[10px]">
+          <button onClick={onDelete} className="px-1 bg-white hover:bg-[var(--marker)] cursor-pointer" title="Убрать фото из ячейки">
+            удалить
+          </button>
+          <button onClick={onPick} className="px-1 bg-white cursor-pointer" title="Заменить файлом с компьютера">
+            заменить
+          </button>
+        </span>
       </>
     )}
   </div>
@@ -101,7 +103,6 @@ function parseNameList(text: string, fileName: string): string[] {
   return rows.map((r) => r[0]).filter(Boolean);
 }
 
-export { loadGlobalProducts, saveGlobalProducts };
 
 interface ProductLibraryDrawerProps {
   isOpen: boolean;
@@ -110,6 +111,8 @@ interface ProductLibraryDrawerProps {
   onSaveProducts: (products: ProductItem[]) => void;
   onAddProductToCanvas?: (product: ProductItem) => void;
   projectName?: string;
+  otherProjects?: { id: string; name: string }[];
+  onMoveToProject?: (ids: string[], projectId: string) => void;
 }
 
 export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
@@ -119,6 +122,8 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
   onSaveProducts,
   onAddProductToCanvas,
   projectName = 'Проект',
+  otherProjects = [],
+  onMoveToProject,
 }) => {
   const [showExport, setShowExport] = useState(false);
   const [exportPreset, setExportPreset] = useState<ExportPreset>('names');
@@ -219,7 +224,6 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
       };
       setLocalProducts(updated);
       onSaveProducts(updated);
-      saveGlobalProducts(updated);
     }
     setCropModalState(null);
   };
@@ -233,7 +237,6 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
   const commit = (next: ProductItem[]) => {
     setLocalProducts(next);
     onSaveProducts(next);
-    saveGlobalProducts(next);
   };
 
   const handleBatchPhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -301,6 +304,14 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
       /* private mode */
     }
   };
+  const clearSlot = (id: string, slot: number) =>
+    commit(
+      localProducts.map((p) => {
+        if (p.id !== id) return p;
+        const cleared = slotSet(p, slot, '');
+        return p.finalIndex === slot ? { ...cleared, finalIndex: undefined } : cleared;
+      })
+    );
   const setFinal = (row: number, col: number) => {
     const next = localProducts.map((p, i) => (i === row ? { ...p, finalIndex: col } : p));
     commit(next);
@@ -641,6 +652,27 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
               удалить выбранные
             </button>
           )}
+          {selectedIds.size > 0 && onMoveToProject && otherProjects.length > 0 && (
+            <select
+              value=""
+              onClick={(e) => e.preventDefault()}
+              onChange={(e) => {
+                const target = otherProjects.find((x) => x.id === e.target.value);
+                if (!target) return;
+                if (!window.confirm(`Перенести ${selectedIds.size} позиций в проект «${target.name}»?`)) return;
+                onMoveToProject([...selectedIds], target.id);
+                setSelectedIds(new Set());
+              }}
+              className="ml-3 h-6 px-1 text-[11px] !bg-transparent underline text-[var(--fg)] cursor-pointer"
+            >
+              <option value="">перенести в проект…</option>
+              {otherProjects.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+            </select>
+          )}
         </label>
         {namingGroup && (
           <div className="mx-2 mb-1 flex items-center gap-1 bg-[var(--marker)] px-2 py-1 text-[13px] ofst-pop">
@@ -760,6 +792,7 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                           isFinal={finalIdx === -1}
                           onPick={() => handleTriggerUpload(idx)}
                           onMarkFinal={() => setFinal(idx, -1)}
+                          onDelete={() => clearSlot(prod.id, -1)}
                         />
                       </td>
                       {variants.map((v, vi) => (
@@ -777,6 +810,7 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                             isFinal={finalIdx === vi}
                             onPick={() => triggerVariantUpload(idx, vi)}
                             onMarkFinal={() => setFinal(idx, vi)}
+                            onDelete={() => clearSlot(prod.id, vi)}
                           />
                         </td>
                       ))}

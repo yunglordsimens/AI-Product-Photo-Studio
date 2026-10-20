@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Card, ProductItem } from '../types';
+import { Card, ProductItem, MasterPrompt } from '../types';
 import { compressDataUrl } from '../utils/imageUtils';
 import { getImageModel, hasGenerationAccess } from '../utils/gemini';
 import {
@@ -23,6 +23,7 @@ import {
   withRetry,
 } from '../utils/catalog';
 import { buildZip, dataUrlToBytes, downloadBlob } from '../utils/zip';
+import { groupPrompts } from '../utils/promptCategories';
 import { isImageFile, normalizeImageFiles } from '../utils/heic';
 
 interface CatalogStudioProps {
@@ -32,6 +33,10 @@ interface CatalogStudioProps {
   projectName: string;
   products: ProductItem[];
   selectedCards: Card[];
+  /** All photos on the board, to pick style references from */
+  boardCards?: Card[];
+  masterPrompts?: MasterPrompt[];
+  onSaveMasterPrompts?: (prompts: MasterPrompt[]) => void;
   onOpenSettings: () => void;
 }
 
@@ -67,8 +72,13 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   projectName,
   products,
   selectedCards,
+  boardCards = [],
+  masterPrompts = [],
+  onSaveMasterPrompts,
   onOpenSettings,
 }) => {
+  // Picking style references from the board or from positions
+  const [refPicker, setRefPicker] = useState<null | 'board' | 'products'>(null);
   const [catalog, setCatalog] = useState<CatalogState>(emptyCatalogState());
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -79,6 +89,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   const [compareId, setCompareIdState] = useState<string | null>(null);
   // Position in the "после" stack (0 = current take) and in the "до" stack (0 = current source)
   const [afterIdx, setAfterIdx] = useState(0);
+  const wheelAcc = useRef(0);
   const [beforeIdx, setBeforeIdx] = useState(0);
   const setCompareId = (id: string | null) => {
     setCompareIdState(id);
@@ -190,6 +201,15 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
     }
     update((prev) => ({ ...prev, refs: [...prev.refs, ...added].slice(0, 3) }));
     if (skipped) setNotice({ kind: 'error', text: `${skipped} файл(ов) не открылось. HEIC сначала экспортируй в JPG.` });
+  };
+
+  const addReferencesFromSrcs = async (picked: { name: string; src: string }[]) => {
+    const added: CatalogState['refs'] = [];
+    for (const it of picked.slice(0, 3 - catalog.refs.length)) {
+      const src = await compressDataUrl(it.src, 1024, 1024, 0.88);
+      if (src.startsWith('data:image')) added.push({ id: newId('ref'), name: it.name, src });
+    }
+    update((prev) => ({ ...prev, refs: [...prev.refs, ...added].slice(0, 3) }));
   };
 
   const addReferencesFromCanvas = async () => {
@@ -527,14 +547,14 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   const [arW, arH] = catalog.aspectRatio.split(':').map(Number);
 
   return (
-    <div id="catalog-studio" className="fixed inset-0 z-50 bg-white text-[var(--fg)] flex flex-col select-none">
+    <div id="catalog-studio" className="absolute inset-0 z-30 bg-white text-[var(--fg)] flex flex-col select-none">
       {/* Head: running line like every part of the studio */}
       <header className="shrink-0 px-2 pt-2">
         <div className="ofst-run">
           <span>Каталог · {projectName}</span>
           <span className="hidden sm:inline">один эталон → одинаковые кадры для всех товаров</span>
-          <button onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer" aria-label="Закрыть каталог">
-            закрыть
+          <button onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer" aria-label="На доску">
+            ← доска
           </button>
         </div>
       </header>
@@ -581,10 +601,23 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                 </button>
               )}
             </div>
-            {selectedCards.length > 0 && catalog.refs.length < 3 && (
-              <button onClick={addReferencesFromCanvas} className="text-[12px] underline">
-                Взять выделенные с доски ({selectedCards.length})
-              </button>
+            {catalog.refs.length < 3 && (
+              <div className="flex flex-wrap -ml-2 text-[12px]">
+                <button onClick={() => setRefPicker('board')} disabled={boardCards.length === 0} className="ofst-cell !h-7">
+                  с доски
+                </button>
+                <button onClick={() => setRefPicker('products')} disabled={!products.some((p) => p.photoDataUrl)} className="ofst-cell !h-7">
+                  из позиций
+                </button>
+                <button onClick={() => refInputRef.current?.click()} className="ofst-cell ofst-cell--muted !h-7">
+                  с компьютера
+                </button>
+                {selectedCards.length > 0 && (
+                  <button onClick={addReferencesFromCanvas} className="ofst-cell ofst-cell--muted !h-7">
+                    выделенные ({selectedCards.length})
+                  </button>
+                )}
+              </div>
             )}
 
             <div className="grid grid-cols-2 gap-0.5">
@@ -629,6 +662,49 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                 >
                   {isDescribing ? 'Описываю…' : 'Описать по эталону'}
                 </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-2 text-[12px] pb-0.5">
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const mp = masterPrompts.find((x) => x.id === e.target.value);
+                    if (mp) update((prev) => ({ ...prev, recipe: mp.prompt }));
+                  }}
+                  className="h-7 px-1 flex-1 min-w-0 text-[12px]"
+                  title="Взять рецепт из мастер-промптов"
+                >
+                  <option value="">из мастер-промптов…</option>
+                  {groupPrompts(masterPrompts, projectId).map((g) => (
+                    <optgroup key={g.title} label={g.title}>
+                      {g.items.map((mp) => (
+                        <option key={mp.id} value={mp.id}>
+                          {mp.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                {onSaveMasterPrompts && (
+                  <button
+                    onClick={() => {
+                      if (!catalog.recipe.trim()) return;
+                      const mp: MasterPrompt = {
+                        id: newId('mp'),
+                        name: `Каталог · ${projectName} · ${new Date().toLocaleDateString('ru-RU')}`,
+                        prompt: catalog.recipe,
+                        category: 'Каталог',
+                        projectId,
+                        tags: ['каталог'],
+                        createdAt: Date.now(),
+                      };
+                      onSaveMasterPrompts([mp, ...masterPrompts]);
+                      setNotice({ kind: 'info', text: 'Рецепт сохранён в мастер-промпты (полка «Этот проект»).' });
+                    }}
+                    className="underline shrink-0"
+                  >
+                    сохранить как мастер-промпт
+                  </button>
+                )}
               </div>
               <textarea
                 value={catalog.recipe}
@@ -805,16 +881,17 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                 Загрузи фото товаров (шаг 2)
               </div>
             ) : (
-              <div className="grid gap-x-0.5 gap-y-2 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              <div className="grid gap-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {catalog.items.map((item, idx) => {
                   const r = resultOf(item);
                   const selected = selectedIds.has(item.id);
+                  const takes = (r?.history?.length || 0) + (r?.src ? 1 : 0);
                   return (
-                    <div key={item.id} className={selected ? 'ofst-outline' : ''}>
-                      <div className="grid grid-cols-2 gap-px">
+                    <div key={item.id} className="relative group/tile">
+                      <div className="grid grid-cols-2 gap-0">
                         <Thumb src={item.original} label="до" ratio={`${arW} / ${arH}`} onOpen={() => setCompareId(item.id)} />
                         <div className="relative bg-[var(--soft)]" style={{ aspectRatio: `${arW} / ${arH}` }}>
-                          {r?.status === 'done' && r.src ? (
+                          {r?.src && r.status !== 'running' ? (
                             <Thumb src={r.src} label="после" ratio={`${arW} / ${arH}`} onOpen={() => setCompareId(item.id)} />
                           ) : r?.status === 'running' ? (
                             <div className="absolute inset-0 flex items-center justify-center text-[12px] text-[var(--grey)]">генерация…</div>
@@ -825,39 +902,39 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-1 pt-0.5 text-[12px]">
+                      {/* Caption lies on the photo; selection is the yellow marker, not a frame */}
+                      <div
+                        className={`absolute left-0 right-0 bottom-0 flex items-center gap-1 px-1 h-6 text-[12px] ${
+                          selected ? 'bg-[var(--marker)]' : 'bg-white/85'
+                        }`}
+                      >
                         <input
                           type="checkbox"
                           checked={selected}
                           onChange={() => toggleSelect(item.id)}
-                          className="accent-black shrink-0 w-3 h-3"
+                          className="shrink-0 w-3 h-3"
                           aria-label="Выбрать"
                         />
                         <span className="tabular-nums text-[var(--grey)] shrink-0">{String(idx + 1).padStart(2, '0')}</span>
-                        {(r?.history?.length || 0) > 0 && (
-                          <span className="text-[var(--grey)] shrink-0" title="Сколько дублей в стопке «после»">
-                            ×{(r?.history?.length || 0) + 1}
-                          </span>
-                        )}
                         <input
                           value={item.name}
                           onChange={(e) => renameItem(item.id, e.target.value)}
                           className="flex-1 min-w-0 !bg-transparent px-0 select-text"
                         />
-                        <IconBtn
-                          title={r?.approved ? 'Снять одобрение' : 'Одобрить'}
-                          onClick={() => toggleApprove(item.id)}
-                          disabled={r?.status !== 'done'}
-                          active={Boolean(r?.approved)}
-                        >
-                          {r?.approved ? '★' : '☆'}
-                        </IconBtn>
-                        <IconBtn title="Перегенерировать" onClick={() => run([item.id])} disabled={isRunning}>
-                          ещё
-                        </IconBtn>
-                        <IconBtn title="Убрать из каталога" onClick={() => removeItem(item.id)} disabled={isRunning}>
-                          убрать
-                        </IconBtn>
+                        {takes > 1 && (
+                          <span className="text-[var(--grey)] shrink-0" title="Дублей в стопке «после»">
+                            ×{takes}
+                          </span>
+                        )}
+                        {r?.approved && <span className="shrink-0" title="Выбран">★</span>}
+                        <span className="hidden group-hover/tile:flex shrink-0">
+                          <IconBtn title="Новый дубль" onClick={() => run([item.id])} disabled={isRunning}>
+                            ещё
+                          </IconBtn>
+                          <IconBtn title="Убрать из каталога" onClick={() => removeItem(item.id)} disabled={isRunning}>
+                            убрать
+                          </IconBtn>
+                        </span>
                       </div>
                     </div>
                   );
@@ -876,6 +953,14 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
         const bIdx = Math.min(beforeIdx, before.length - 1);
         const shownAfter = after[aIdx];
         const isRunningNow = compareResult?.status === 'running';
+        // Wheel / two-finger swipe over a half flips its stack, one step per gesture
+        const flipOnWheel = (total: number, set: React.Dispatch<React.SetStateAction<number>>) => (e: React.WheelEvent) => {
+          wheelAcc.current += e.deltaY;
+          if (Math.abs(wheelAcc.current) < 60) return;
+          const step = wheelAcc.current > 0 ? 1 : -1;
+          wheelAcc.current = 0;
+          set((i) => Math.max(0, Math.min(total - 1, i + step)));
+        };
         const stepper = (idx: number, total: number, set: (n: number) => void, label: string) => (
           <span className="flex items-center">
             <button onClick={() => set(Math.max(0, idx - 1))} disabled={idx === 0} className="ofst-cell !h-6 w-6" aria-label={`${label}: новее`}>
@@ -895,14 +980,14 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
               <span className="truncate">
                 {compareIndex + 1}/{catalog.items.length} · {compareItem.name}
               </span>
-              <span>← → позиции · ↑ ↓ дубли · Shift ↑ ↓ исходники · A выбрать</span>
+              <span>← → позиции · колесо или ↑ ↓ над половиной — листать · A выбрать</span>
               <button onClick={() => setCompareId(null)} className="hover:text-[var(--fg)]" aria-label="Закрыть">
                 закрыть
               </button>
             </div>
             <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 gap-0.5 overflow-auto md:overflow-hidden">
               {/* до */}
-              <div className="flex flex-col min-h-[40vh] md:min-h-0">
+              <div className="flex flex-col min-h-[40vh] md:min-h-0" onWheel={flipOnWheel(before.length, setBeforeIdx)}>
                 <div className="flex items-center justify-between text-[12px] h-7">
                   <span>до{bIdx > 0 ? ' · прежний исходник' : ''}</span>
                   <span className="flex items-center">
@@ -917,7 +1002,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                 <BigImage src={before[bIdx]} label="" />
               </div>
               {/* после */}
-              <div className="flex flex-col min-h-[40vh] md:min-h-0">
+              <div className="flex flex-col min-h-[40vh] md:min-h-0" onWheel={flipOnWheel(after.length, setAfterIdx)}>
                 <div className="flex items-center justify-between text-[12px] h-7">
                   <span>
                     после · {activeVersion?.label}
@@ -972,6 +1057,24 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
           </div>
         );
       })()}
+
+      {/* Pick style references from the board or from positions */}
+      {refPicker && (
+        <SrcPicker
+          title={refPicker === 'board' ? 'Эталон с доски' : 'Эталон из позиций'}
+          max={3 - catalog.refs.length}
+          items={
+            refPicker === 'board'
+              ? boardCards.map((c) => ({ id: c.id, name: c.name || 'фото', src: c.src }))
+              : products.filter((p) => p.photoDataUrl).map((p) => ({ id: p.id, name: p.name, src: p.photoDataUrl }))
+          }
+          onCancel={() => setRefPicker(null)}
+          onConfirm={(picked) => {
+            setRefPicker(null);
+            addReferencesFromSrcs(picked);
+          }}
+        />
+      )}
 
       {/* Product picker */}
       {showProductPicker && (
@@ -1094,6 +1197,69 @@ function IconBtn({
     >
       {children}
     </button>
+  );
+}
+
+/** Choose up to `max` photos (board cards or positions) */
+function SrcPicker({
+  title,
+  items,
+  max,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  items: { id: string; name: string; src: string }[];
+  max: number;
+  onCancel: () => void;
+  onConfirm: (picked: { name: string; src: string }[]) => void;
+}) {
+  const [picked, setPicked] = useState<string[]>([]);
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-2 ofst-fade" onClick={onCancel}>
+      <div className="bg-white max-w-3xl w-full max-h-[86vh] flex flex-col p-2 gap-1" onClick={(e) => e.stopPropagation()}>
+        <div className="ofst-run">
+          <span>{title}</span>
+          <span>
+            выбрано {picked.length} из {max}
+          </span>
+        </div>
+        <div className="flex-1 overflow-y-auto custom-scrollbar grid grid-cols-3 sm:grid-cols-5 gap-0">
+          {items.map((it) => {
+            const on = picked.includes(it.id);
+            return (
+              <button
+                key={it.id}
+                onClick={() =>
+                  setPicked((prev) => (on ? prev.filter((x) => x !== it.id) : prev.length < max ? [...prev, it.id] : prev))
+                }
+                className="relative text-left"
+              >
+                <div className="aspect-square bg-[var(--soft)]">
+                  <img src={it.src} alt={it.name} className="w-full h-full object-cover" />
+                </div>
+                <div className={`absolute left-0 right-0 bottom-0 px-1 text-[11px] truncate ${on ? 'bg-[var(--marker)]' : 'bg-white/85'}`}>
+                  {on ? `${picked.indexOf(it.id) + 1} · ` : ''}
+                  {it.name}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex justify-end">
+          <button onClick={onCancel} className="ofst-cell ofst-cell--muted">
+            Отмена
+          </button>
+          <button
+            onClick={() => onConfirm(items.filter((it) => picked.includes(it.id)).map((it) => ({ name: it.name, src: it.src })))}
+            disabled={picked.length === 0}
+            className="ofst-cell ofst-cell--primary"
+          >
+            Взять эталоном {picked.length || ''}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
