@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Card, MasterPrompt, Note, ProductItem } from '../types';
 import { groupPrompts } from '../utils/promptCategories';
+import { REFERENCE_ROLES } from '../utils/referenceRoles';
 
 export interface ConsideredNoteInfo {
   id: string;
@@ -484,6 +485,19 @@ export function GenerationPanel({
                 </div>
               )}
               {thumbs('w-16 h-16')}
+              {selectedCards.some((c) => c.takes?.length) && (
+                <p className="mt-1 text-[12px] leading-snug">
+                  {selectedCards
+                    .slice(0, 5)
+                    .map((c, i) =>
+                      c.takes?.length
+                        ? `${i + 1}: ${c.takes.map((t) => REFERENCE_ROLES.find((r) => r.id === t)?.label).filter(Boolean).join(', ')}`
+                        : ''
+                    )
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+              )}
               <p className="mt-1 text-[12px] text-[var(--grey)] leading-snug">
                 {isProductReplacementMode
                   ? 'С них берутся сцена, свет и фон; продукт — из библиотеки.'

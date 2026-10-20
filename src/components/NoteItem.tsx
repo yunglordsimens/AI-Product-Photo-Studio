@@ -4,6 +4,8 @@ import { Note, NoteColor } from '../types';
 interface NoteItemProps {
   note: Note;
   isSelected: boolean;
+  /** Faded back while another group is in focus */
+  dimmed?: boolean;
   isAttached: boolean;
   attachedCardName?: string;
   onMouseDown: (e: React.MouseEvent, noteId: string) => void;
@@ -40,6 +42,7 @@ export const NoteItem: React.FC<NoteItemProps> = memo(
   ({
     note,
     isSelected,
+    dimmed = false,
     isAttached,
     attachedCardName,
     onMouseDown,
@@ -178,8 +181,8 @@ export const NoteItem: React.FC<NoteItemProps> = memo(
             zIndex: isSelected ? 40 : note.zIndex || 20,
             touchAction: 'none',
           }}
-          className={`group absolute top-0 left-0 select-none flex flex-col pointer-events-auto cursor-grab active:cursor-grabbing p-1.5 ${styleTheme.bg} ${styleTheme.text} ${
-            isSelected ? 'outline-1 outline-[var(--fg)] outline-offset-1' : ''
+          className={`group absolute top-0 left-0 select-none flex flex-col pointer-events-auto cursor-grab active:cursor-grabbing p-1.5 ${dimmed ? 'opacity-15' : ''} ${styleTheme.bg} ${styleTheme.text} ${
+            isSelected ? 'ofst-outline' : ''
           }`}
         >
           {/* Head: small line, like a caption. Controls show on hover. */}

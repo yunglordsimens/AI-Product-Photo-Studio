@@ -53,6 +53,8 @@ interface TopBarProps {
   isMenuOpen?: boolean;
   /** Projects column hidden on desktop: the «Проекты» cell then shows here to bring it back */
   isSidebarCollapsed?: boolean;
+  /** The selection is exactly one group: the «Группа» cell then ungroups it */
+  onUngroupSelected?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -65,6 +67,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   hiddenTools = [],
   isMenuOpen = false,
   isSidebarCollapsed = false,
+  onUngroupSelected,
   onAddImage,
   onAddFolder,
   onClearAll,
@@ -173,8 +176,13 @@ export const TopBar: React.FC<TopBarProps> = ({
       </button>
     ) },
     { id: 'group', desktopOnly: true, node: canGroup && onGroupSelected && (
-      <button id="btn-group-selected-cards" onClick={onGroupSelected} className={cell()} title="Сгруппировать выделенные карточки">
-        Группа
+      <button
+        id="btn-group-selected-cards"
+        onClick={onUngroupSelected || onGroupSelected}
+        className={cell(Boolean(onUngroupSelected))}
+        title={onUngroupSelected ? 'Разгруппировать (⇧⌘G)' : 'Сгруппировать выделенные (⌘G)'}
+      >
+        {onUngroupSelected ? 'Разгруппировать' : 'Группа'}
       </button>
     ) },
     { id: 'links', desktopOnly: true, node: (
@@ -253,7 +261,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           {projectName} · {cardCount} фото
           {selectedCount > 0 && <span className="ml-1 text-[var(--fg)]">· выбрано {selectedCount}</span>}
         </span>
-        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.7 · 19.10</span>
+        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.8 · 20.10</span>
       </div>
 
       {/* Tools: text cells, reorderable by drag */}

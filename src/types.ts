@@ -35,6 +35,8 @@ export interface Card {
   aspectRatio?: number;
   zIndex?: number;
   meta?: GenerationMeta;
+  /** What to take from this photo when it is used as a reference (see REFERENCE_ROLES) */
+  takes?: string[];
 }
 
 export interface Connection {

@@ -707,7 +707,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                   const r = resultOf(item);
                   const selected = selectedIds.has(item.id);
                   return (
-                    <div key={item.id} className={selected ? 'outline-1 outline-[var(--fg)]' : ''}>
+                    <div key={item.id} className={selected ? 'ofst-outline' : ''}>
                       <div className="grid grid-cols-2 gap-px">
                         <Thumb src={item.original} label="до" ratio={`${arW} / ${arH}`} onOpen={() => setCompareId(item.id)} />
                         <div className="relative bg-[var(--soft)]" style={{ aspectRatio: `${arW} / ${arH}` }}>

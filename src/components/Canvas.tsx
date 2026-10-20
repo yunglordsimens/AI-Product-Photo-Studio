@@ -26,6 +26,7 @@ interface CanvasProps {
   onDropProducts?: (productIds: string[], atCanvasPos: { x: number; y: number }) => void;
   /** Board photos dropped on a position row (slot -1 = original, 0.. = variant column, undefined = first free) */
   onDropCardsOnPosition?: (cardIds: string[], positionId: string, slot?: number) => void;
+  onChangeCardTakes?: (cardId: string, takes: string[]) => void;
   onDeleteSelection?: (cardIds: string[], noteIds: string[]) => void;
   onImportFolder?: (kind: 'products' | 'board' | 'ask') => void;
   onAddNote: (note: Note) => void;
@@ -68,6 +69,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onAddFolder,
   onDropProducts,
   onDropCardsOnPosition,
+  onChangeCardTakes,
   onDeleteSelection,
   onImportFolder,
   onAddNote,
@@ -290,6 +292,54 @@ export const Canvas: React.FC<CanvasProps> = ({
   const handleResetZoom = () => {
     onUpdatePanZoom({ x: 0, y: 0 }, 1.0);
   };
+
+  // Zoom so that the given box fills the view
+  const fitBounds = (minX: number, minY: number, maxX: number, maxY: number, maxZoom = 1.2) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const padding = 60;
+    const w = Math.max(1, maxX - minX);
+    const h = Math.max(1, maxY - minY);
+    const z = Math.max(0.15, Math.min((rect.width - padding * 2) / w, (rect.height - padding * 2) / h, maxZoom));
+    onUpdatePanZoom({ x: rect.width / 2 - (minX + w / 2) * z, y: rect.height / 2 - (minY + h / 2) * z }, z);
+  };
+
+  // Focus on one group: the view zooms to it and everything else fades back
+  const [focusGroupId, setFocusGroupIdState] = useState<string | null>(null);
+  // Leaving focus brings back the view from before it
+  const viewBeforeFocusRef = useRef<{ pan: { x: number; y: number }; zoom: number } | null>(null);
+  const setFocusGroupId = (id: string | null) => {
+    if (id === null && viewBeforeFocusRef.current) {
+      onUpdatePanZoom(viewBeforeFocusRef.current.pan, viewBeforeFocusRef.current.zoom);
+      viewBeforeFocusRef.current = null;
+    }
+    setFocusGroupIdState(id);
+  };
+  const focusGroup = (project.groups || []).find((g) => g.id === focusGroupId) || null;
+  const focusIds = useMemo(() => new Set(focusGroup?.children || []), [focusGroup]);
+  const enterFocus = (groupId: string) => {
+    const g = (project.groups || []).find((x) => x.id === groupId);
+    const members = (project.cards || []).filter((c) => g?.children.includes(c.id));
+    if (!g || members.length === 0) return;
+    if (!viewBeforeFocusRef.current) viewBeforeFocusRef.current = { pan: { ...pan }, zoom };
+    setFocusGroupIdState(groupId);
+    fitBounds(
+      Math.min(...members.map((c) => c.x)),
+      Math.min(...members.map((c) => c.y)),
+      Math.max(...members.map((c) => c.x + c.width)),
+      Math.max(...members.map((c) => c.y + (c.height || 300))),
+      2
+    );
+  };
+  useEffect(() => {
+    if (!focusGroupId) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setFocusGroupId(null);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focusGroupId]);
+  useEffect(() => {
+    if (focusGroupId && !focusGroup) setFocusGroupId(null);
+  }, [focusGroupId, focusGroup]);
 
   const handleFitCards = () => {
     const allCards = project.cards || [];
@@ -517,7 +567,6 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       let newSelection: Set<string>;
       const currentSelected = selectedCardIdsRef.current;
-      const parentGroup = (project.groups || []).find((g) => g.children.includes(cardId));
 
       if (e.shiftKey) {
         newSelection = new Set(currentSelected);
@@ -530,12 +579,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         if (currentSelected.has(cardId)) {
           newSelection = new Set(currentSelected);
         } else {
-          newSelection = new Set();
-          if (parentGroup) {
-            parentGroup.children.forEach((cid) => newSelection.add(cid));
-          } else {
-            newSelection.add(cardId);
-          }
+          // Photos inside a group move one by one; the whole group moves by its label or empty area
+          newSelection = new Set([cardId]);
         }
         onSelectNotes(new Set());
         selectedNoteIdsRef.current = new Set();
@@ -1338,6 +1383,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         id="canvas-world-plane"
         style={{
           transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
+          // Outlines stay 1 screen pixel at any zoom
+          ['--canvas-zoom' as string]: zoom,
           transformOrigin: '0 0',
         }}
         className="absolute inset-0 pointer-events-none"
@@ -1434,6 +1481,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                 width: `${w}px`,
                 height: `${h}px`,
                 zIndex: 4,
+                opacity: focusGroupId && focusGroupId !== group.id ? 0.15 : 1,
                 backgroundColor: `${group.color || '#0a0a0a'}12`,
               }}
               className="absolute pointer-events-auto cursor-grab active:cursor-grabbing group/grp select-none"
@@ -1443,18 +1491,37 @@ export const Canvas: React.FC<CanvasProps> = ({
                 <span className="w-2 h-2 self-center" style={{ backgroundColor: group.color || '#0a0a0a' }} />
                 <span>{group.name || 'Группа'}</span>
                 <span className="text-[var(--grey)] tabular-nums">{memberCards.length}</span>
-                {onUngroup && (
+                <span
+                  className={`flex gap-2 ${
+                    group.children.some((cid) => selectedCardIds.has(cid)) || focusGroupId === group.id ? '' : 'opacity-0 group-hover/grp:opacity-100'
+                  }`}
+                >
                   <button
+                    onMouseDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation();
-                      onUngroup(group.id);
+                      if (focusGroupId === group.id) setFocusGroupId(null);
+                      else enterFocus(group.id);
                     }}
-                    className="text-[var(--grey)] hover:text-[var(--fg)] underline opacity-0 group-hover/grp:opacity-100 cursor-pointer"
-                    title="Разгруппировать"
+                    className="text-[var(--grey)] hover:text-[var(--fg)] underline cursor-pointer"
+                    title="Приблизить группу и приглушить остальное (Esc — выйти)"
                   >
-                    разгруппировать
+                    {focusGroupId === group.id ? 'выйти из фокуса' : 'фокус'}
                   </button>
-                )}
+                  {onUngroup && (
+                    <button
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUngroup(group.id);
+                      }}
+                      className="text-[var(--grey)] hover:text-[var(--fg)] underline cursor-pointer"
+                      title="Разгруппировать (⇧⌘G)"
+                    >
+                      разгруппировать
+                    </button>
+                  )}
+                </span>
               </div>
             </div>
           );
@@ -1585,6 +1652,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             key={card.id}
             card={card}
             isSelected={selectedCardIds.has(card.id)}
+            dimmed={Boolean(focusGroupId) && !focusIds.has(card.id)}
             isConnectingSource={connectingSourceCardId === card.id}
             isConnectionMode={isConnectionMode}
             onMouseDown={handleCardMouseDown}
@@ -1592,6 +1660,8 @@ export const Canvas: React.FC<CanvasProps> = ({
             onDelete={onDeleteCard}
             onDuplicate={onDuplicateCard}
             onPreview={onPreviewCard}
+            onChangeTakes={onChangeCardTakes}
+            editTakes={selectedCardIds.size === 1 && selectedCardIds.has(card.id)}
           />
         ))}
 
@@ -1603,6 +1673,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               key={note.id}
               note={note}
               isSelected={selectedNoteIds.has(note.id)}
+              dimmed={Boolean(focusGroupId) && !(note.attachedTo && focusIds.has(note.attachedTo))}
               isAttached={Boolean(note.attachedTo && attachedCard)}
               attachedCardName={attachedCard?.name || 'Карточка'}
               onMouseDown={handleNoteMouseDown}
@@ -1788,7 +1859,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       {isDragOver && (
         <div
           id="canvas-dropzone-overlay"
-          className="absolute inset-0 border-2 border-[var(--fg)] bg-white/60 flex items-center justify-center z-50 pointer-events-none"
+          className="absolute inset-0 ofst-outline bg-white/60 flex items-center justify-center z-50 pointer-events-none"
         >
           <p className="text-[clamp(28px,3.6vw,56px)] font-medium leading-none tracking-[-.025em]">Отпусти — фото встанут сюда</p>
         </div>

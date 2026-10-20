@@ -10,6 +10,9 @@ interface SidebarProps {
   /** Desktop: the column folds to zero width */
   isCollapsed?: boolean;
   onCollapse?: () => void;
+  /** Desktop width in px; the right edge can be dragged */
+  width?: number;
+  onResize?: (width: number) => void;
   onSelectProject: (id: string) => void;
   onCreateProject: () => void;
   onDeleteProject: (id: string) => void;
@@ -24,11 +27,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
   isCollapsed = false,
   onCollapse,
+  width = 180,
+  onResize,
   onSelectProject,
   onCreateProject,
   onDeleteProject,
   onRenameProject,
 }) => {
+  const [resizing, setResizing] = useState(false);
+  const startResize = (e: React.PointerEvent) => {
+    if (!onResize) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = width;
+    setResizing(true);
+    const move = (ev: PointerEvent) => onResize(Math.round(Math.min(360, Math.max(140, startW + ev.clientX - startX))));
+    const up = () => {
+      setResizing(false);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempName, setTempName] = useState<string>('');
 
@@ -62,12 +83,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       <aside
         id="sidebar-projects"
+        style={{ ['--sb-w' as string]: `${width}px`, transition: resizing ? 'none' : undefined }}
         className={`ofst-sidebar bg-white shrink-0 select-none z-50 md:z-20 overflow-hidden fixed inset-y-0 left-0 w-[240px] md:relative md:translate-x-0 ${
-          isCollapsed ? 'md:w-0' : 'md:w-[180px]'
+          isCollapsed ? 'md:w-0' : 'md:w-[var(--sb-w)]'
         } ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
       >
         {/* Fixed-width inner column, so nothing reflows while the sidebar folds */}
-        <div className="flex flex-col h-full w-[240px] md:w-[180px]">
+        <div className="flex flex-col h-full w-[240px] md:w-[var(--sb-w)]">
         <div className="px-2 pt-2">
           <div className="ofst-run">
             <span>Проекты</span>
@@ -169,6 +191,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
         </div>
+        {onResize && !isCollapsed && (
+          <div onPointerDown={startResize} className="ofst-dock-handle ofst-dock-handle--right hidden md:block" title="Потяни, чтобы сделать шире или уже" />
+        )}
       </aside>
     </>
   );

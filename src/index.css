@@ -91,6 +91,12 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--fg); outlin
 .ofst-cell--muted { color: var(--grey); }
 .ofst-cell--muted:hover { color: var(--fg); }
 
+/* One outline for everything that is "chosen": selected photo, final ★, drop target, selected note */
+.ofst-outline, .hover\:ofst-outline:hover {
+  outline: calc(1px / var(--canvas-zoom, 1)) solid var(--fg);
+  outline-offset: calc(-1px / var(--canvas-zoom, 1));
+}
+
 /* Side panel: white column with a quiet grey edge, so stacked panels read as separate sheets */
 .ofst-panel { background: var(--bg); border-left: 1px solid var(--soft-2); }
 
@@ -102,12 +108,14 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--fg); outlin
 /* Left edge of a panel: drag to resize; a thin line shows on hover */
 .ofst-dock-handle { position: absolute; top: 0; bottom: 0; left: 0; width: 6px; cursor: col-resize; z-index: 5; }
 .ofst-dock-handle:hover, .ofst-dock-handle:active { background: linear-gradient(to right, var(--fg) 1px, transparent 1px); }
+.ofst-dock-handle--right { left: auto; right: 0; }
+.ofst-dock-handle--right:hover, .ofst-dock-handle--right:active { background: linear-gradient(to left, var(--fg) 1px, transparent 1px); }
 @media (max-width: 767px) {
   .ofst-dock-slot { width: 100vw !important; min-width: 100vw !important; }
 }
 
 /* A position row / slot under a photo dragged from the board */
-td.ofst-drop-target > div { outline: 2px solid var(--fg); outline-offset: -2px; background: var(--marker) !important; }
+td.ofst-drop-target > div { outline: 1px solid var(--fg); outline-offset: -1px; background: var(--marker) !important; }
 td.ofst-drop-target button { background: transparent !important; }
 tr.ofst-drop-target > td { background: var(--marker); }
 

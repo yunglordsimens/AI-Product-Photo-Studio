@@ -1,5 +1,6 @@
 import { Card } from '../types';
 import { SOURCE_FIX_MARKER } from './storage';
+import { rolesPrompt } from './referenceRoles';
 
 export const API_KEY_STORAGE_KEY = 'aips_api_key';
 export const STUDIO_PASSWORD_STORAGE_KEY = 'aips_studio_password';
@@ -396,6 +397,21 @@ export async function generateImageWithGemini(
       `Новую сцену, свет, фон и ракурс сделай так: ${userPrompt || 'чистая студийная предметная съёмка'}`;
   } else {
     promptText = `Сгенерируй изображение в стиле приложенных референсов. ${userPrompt || ''}`.trim();
+  }
+
+  // Roles marked on the board: tell the model which reference gives what (image numbers as they are sent)
+  if (!isSourceFix) {
+    const offset = options?.productImageDataUrl ? 1 : 0;
+    const roleLines = referenceCards
+      .slice(0, 5)
+      .map((card, i) => {
+        const what = rolesPrompt(card.takes);
+        return what ? `с изображения ${i + 1 + offset} возьми только ${what}` : '';
+      })
+      .filter(Boolean);
+    if (roleLines.length > 0) {
+      promptText += ` Из референсов: ${roleLines.join('; ')}. Остальное на этих изображениях не копируй.`;
+    }
   }
 
   // Keep scenes clean: the model likes to add pens, hands and props nobody asked for

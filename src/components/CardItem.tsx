@@ -1,9 +1,12 @@
 import React, { memo, useState } from 'react';
 import { Card } from '../types';
+import { REFERENCE_ROLES } from '../utils/referenceRoles';
 
 interface CardItemProps {
   card: Card;
   isSelected: boolean;
+  /** Faded back while another group is in focus */
+  dimmed?: boolean;
   isConnectingSource?: boolean;
   isConnectionMode?: boolean;
   onMouseDown: (e: React.MouseEvent, cardId: string) => void;
@@ -12,6 +15,10 @@ interface CardItemProps {
   onDelete: (cardId: string) => void;
   onDuplicate: (card: Card) => void;
   onPreview: (card: Card) => void;
+  /** Mark what to take from this photo (фон, свет, ракурс…) */
+  onChangeTakes?: (cardId: string, takes: string[]) => void;
+  /** Show all role chips to pick from (only when this is the one selected photo) */
+  editTakes?: boolean;
 }
 
 const stop = {
@@ -26,6 +33,7 @@ export const CardItem: React.FC<CardItemProps> = memo(
   ({
     card,
     isSelected,
+    dimmed = false,
     isConnectingSource = false,
     isConnectionMode = false,
     onMouseDown,
@@ -34,6 +42,8 @@ export const CardItem: React.FC<CardItemProps> = memo(
     onDelete,
     onDuplicate,
     onPreview,
+    onChangeTakes,
+    editTakes = false,
   }) => {
     const [showInfo, setShowInfo] = useState(false);
     const meta = card.meta;
@@ -41,11 +51,11 @@ export const CardItem: React.FC<CardItemProps> = memo(
       ? { generate: 'Генерация', product: 'Продукт в сцене', fix: 'Исправление исходника', batch: 'Пакет' }[meta.kind]
       : '';
     const outline = isConnectingSource
-      ? 'outline-2 outline-[var(--marker)]'
+      ? 'ofst-outline'
       : isSelected
-      ? 'outline-1 outline-[var(--fg)]'
+      ? 'ofst-outline'
       : isConnectionMode
-      ? 'hover:outline-1 hover:outline-[var(--fg)]'
+      ? 'hover:ofst-outline'
       : '';
     return (
       <div
@@ -59,7 +69,7 @@ export const CardItem: React.FC<CardItemProps> = memo(
           zIndex: isConnectingSource ? 40 : isSelected ? 30 : card.zIndex || 10,
           touchAction: 'none',
         }}
-        className={`group absolute top-0 left-0 select-none pointer-events-auto ${
+        className={`group absolute top-0 left-0 select-none pointer-events-auto ${dimmed ? 'opacity-15' : ''} ${
           isConnectionMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'
         }`}
       >
@@ -141,6 +151,31 @@ export const CardItem: React.FC<CardItemProps> = memo(
             </button>
           )}
         </div>
+
+        {/* What to take from this reference: shown when selected, or when something is marked */}
+        {onChangeTakes && (editTakes || (card.takes && card.takes.length > 0)) && (
+          <div className="flex flex-wrap gap-x-1 pt-0.5 text-[11px] leading-4" {...stop}>
+            {editTakes && <span className="text-[var(--grey)]">берём:</span>}
+            {REFERENCE_ROLES.filter((r) => editTakes || card.takes?.includes(r.id)).map((r) => {
+              const on = Boolean(card.takes?.includes(r.id));
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const next = on ? (card.takes || []).filter((t) => t !== r.id) : [...(card.takes || []), r.id];
+                    onChangeTakes(card.id, next);
+                  }}
+                  className={`px-0.5 cursor-pointer ${on ? 'bg-[var(--fg)] text-white' : 'text-[var(--grey)] hover:text-[var(--fg)]'}`}
+                  title={on ? 'Не брать' : 'Брать с этого фото'}
+                >
+                  {r.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }

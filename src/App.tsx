@@ -173,6 +173,19 @@ export default function App() {
       return false;
     }
   });
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      return Number(localStorage.getItem('aips_sidebar_width')) || 180;
+    } catch {
+      return 180;
+    }
+  });
+  const resizeSidebar = useCallback((w: number) => {
+    setSidebarWidth(w);
+    try {
+      localStorage.setItem('aips_sidebar_width', String(w));
+    } catch {}
+  }, []);
   const toggleSidebar = useCallback(() => {
     if (window.innerWidth < 768) {
       setIsMobileSidebarOpen((prev) => !prev);
@@ -1664,7 +1677,7 @@ export default function App() {
         return;
       }
 
-      if (e.key === 'g' || e.key === 'G' || e.key === 'п' || e.key === 'П') {
+      if (!e.metaKey && !e.ctrlKey && !e.altKey && (e.key === 'g' || e.key === 'G' || e.key === 'п' || e.key === 'П')) {
         e.preventDefault();
         setIsGenerationOpen((prev) => !prev);
       }
@@ -1934,6 +1947,44 @@ export default function App() {
     [activeProject.cards, productsList, handleSaveProducts]
   );
 
+  // What to take from a reference photo (фон, свет, ракурс…)
+  const handleChangeCardTakes = useCallback(
+    (cardId: string, takes: string[]) => {
+      handleUpdateCards((activeProject.cards || []).map((c) => (c.id === cardId ? { ...c, takes } : c)));
+    },
+    [activeProject.cards, handleUpdateCards]
+  );
+
+  // The selection is exactly one existing group → the top-bar cell ungroups it
+  const selectedGroup = useMemo(() => {
+    if (selectedCardIds.size === 0) return undefined;
+    return (activeProject.groups || []).find(
+      (g) => g.children.length === selectedCardIds.size && g.children.every((id) => selectedCardIds.has(id))
+    );
+  }, [activeProject.groups, selectedCardIds]);
+
+  // ⌘G groups the selection, ⇧⌘G ungroups the group it belongs to
+  const groupKeysRef = useRef({ group: handleGroupSelected, ungroup: handleUngroup, groups: activeProject.groups, sel: selectedCardIds });
+  groupKeysRef.current = { group: handleGroupSelected, ungroup: handleUngroup, groups: activeProject.groups, sel: selectedCardIds };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'g') return;
+      const t = e.target as HTMLElement;
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
+      const { group, ungroup, groups, sel } = groupKeysRef.current;
+      if (sel.size === 0) return;
+      e.preventDefault();
+      if (e.shiftKey) {
+        const g = (groups || []).find((x) => x.children.some((id) => sel.has(id)));
+        if (g) ungroup(g.id);
+      } else {
+        group();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // Paste: a picture copied anywhere (Pinterest "Copy image", a screenshot) lands on the board with ⌘V / Ctrl+V
   const handleAddImagesRef = useRef(handleAddImages);
   handleAddImagesRef.current = handleAddImages;
@@ -2093,6 +2144,7 @@ export default function App() {
         isProductsOpen={isProductLibraryOpen}
         onGroupSelected={handleGroupSelected}
         canGroup={selectedCardIds.size > 0}
+        onUngroupSelected={selectedGroup ? () => handleUngroup(selectedGroup.id) : undefined}
         onAddSiteMockup={handleAddSiteMockupClick}
         hasSiteMockup={Boolean(activeProject.siteMockup)}
         onExportImages={handleExportImages}
@@ -2111,6 +2163,8 @@ export default function App() {
           isMobileOpen={isMobileSidebarOpen}
           isCollapsed={isSidebarCollapsed}
           onCollapse={toggleSidebar}
+          width={sidebarWidth}
+          onResize={resizeSidebar}
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
           onSelectProject={handleSelectProject}
           onCreateProject={handleCreateProject}
@@ -2123,6 +2177,7 @@ export default function App() {
           onAddFolder={askAboutFolder}
           onDeleteSelection={handleDeleteSelection}
           onDropProducts={handleDropProducts}
+          onChangeCardTakes={handleChangeCardTakes}
           onDropCardsOnPosition={isProductLibraryOpen ? handleDropCardsOnPosition : undefined}
           onImportFolder={(kind) => pickFolder(kind)}
           selectedCardIds={selectedCardIds}
@@ -2168,7 +2223,8 @@ export default function App() {
         <div
           id="studio-dock"
           ref={dockRef}
-          className={`fixed top-10 right-0 bottom-0 z-40 flex max-w-full ${isSidebarCollapsed ? '' : 'md:max-w-[calc(100vw-180px)]'} overflow-x-auto overflow-y-hidden overscroll-x-contain snap-x snap-mandatory md:snap-none custom-scrollbar`}
+          style={{ ['--sb-w' as string]: `${isSidebarCollapsed ? 0 : sidebarWidth}px` }}
+          className={`fixed top-10 right-0 bottom-0 z-40 flex max-w-full md:max-w-[calc(100vw-var(--sb-w))] overflow-x-auto overflow-y-hidden overscroll-x-contain snap-x snap-mandatory md:snap-none custom-scrollbar`}
         >
           {dockOrder.map((id) => (
             <DockSlot

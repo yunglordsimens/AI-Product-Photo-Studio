@@ -5,18 +5,32 @@ import { ImageCropModal } from './ImageCropModal';
 import { normalizeImageFiles, isImageFile } from '../utils/heic';
 import { PRODUCT_DRAG_TYPE } from '../utils/dragTypes';
 import { EXPORT_PRESETS, ExportPhotos, ExportPreset, exportPositions } from '../utils/positionsExport';
+import { NO_GROUP, SLOT_DRAG_TYPE, SlotRef, groupByCategory, mergeInto, movePhoto, renameCategory, setCategory, slotSet } from '../utils/positions';
 
 /** One square photo slot in the positions table; ★ marks the final photo of the row. */
-const Slot: React.FC<{ src: string; label: string; isFinal: boolean; onPick: () => void; onMarkFinal: () => void }> = ({
-  src,
-  label,
-  isFinal,
-  onPick,
-  onMarkFinal,
-}) => (
-  <div className={`relative w-[104px] h-[104px] bg-[var(--soft)] group/slot ${isFinal && src ? 'outline-2 outline-[var(--fg)] -outline-offset-2' : ''}`}>
+const Slot: React.FC<{
+  src: string;
+  label: string;
+  isFinal: boolean;
+  dragRef: SlotRef;
+  onPick: () => void;
+  onMarkFinal: () => void;
+}> = ({ src, label, isFinal, dragRef, onPick, onMarkFinal }) => (
+  <div className={`relative w-[104px] h-[104px] bg-[var(--soft)] group/slot ${isFinal && src ? 'ofst-outline' : ''}`}>
     {src ? (
-      <img src={src} alt={label} className="w-full h-full object-cover" draggable={false} />
+      <img
+        src={src}
+        alt={label}
+        className="w-full h-full object-cover cursor-grab"
+        draggable
+        onDragStart={(e) => {
+          // A photo moves between cells; the row's own drag (to the board) must not start
+          e.stopPropagation();
+          e.dataTransfer.setData(SLOT_DRAG_TYPE, JSON.stringify(dragRef));
+          e.dataTransfer.effectAllowed = 'move';
+        }}
+        title="Перетащи в другую ячейку или строку"
+      />
     ) : (
       <button onClick={onPick} className="w-full h-full text-[11px] text-[var(--grey)] hover:text-[var(--fg)] hover:bg-[var(--soft-2)] cursor-pointer" title={`Загрузить: ${label}`}>
         + {label}
@@ -313,6 +327,95 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
 
 
 
+  // ---- Drag and drop inside the table ----
+  const [dropKey, setDropKey] = useState<string | null>(null);
+  const [renamingGroup, setRenamingGroup] = useState<string | null>(null);
+
+  const readImageFile = async (file: File): Promise<string> => {
+    const [img] = await normalizeImageFiles([file]);
+    if (!img) return '';
+    const raw = await new Promise<string>((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as string);
+      r.onerror = () => resolve('');
+      r.readAsDataURL(img);
+    });
+    return raw ? compressImageDataUrl(raw, 1200, 0.85) : '';
+  };
+
+  const acceptsDrop = (e: React.DragEvent) =>
+    e.dataTransfer.types.includes(SLOT_DRAG_TYPE) || e.dataTransfer.types.includes(PRODUCT_DRAG_TYPE) || e.dataTransfer.types.includes('Files');
+
+  const dropHandlers = (key: string, onDrop: (e: React.DragEvent) => void) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!acceptsDrop(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = e.dataTransfer.types.includes('Files') ? 'copy' : 'move';
+      if (dropKey !== key) setDropKey(key);
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDropKey((k) => (k === key ? null : k));
+    },
+    onDrop: (e: React.DragEvent) => {
+      if (!acceptsDrop(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDropKey(null);
+      onDrop(e);
+    },
+  });
+
+  /** Something dropped on a photo cell: a photo from another cell, whole rows, or files from the computer */
+  const dropOnSlot = async (e: React.DragEvent, target: SlotRef) => {
+    const slotData = e.dataTransfer.getData(SLOT_DRAG_TYPE);
+    if (slotData) {
+      commit(movePhoto(localProducts, JSON.parse(slotData) as SlotRef, target));
+      return;
+    }
+    const rows = e.dataTransfer.getData(PRODUCT_DRAG_TYPE);
+    if (rows) {
+      commit(mergeInto(localProducts, JSON.parse(rows) as string[], target.id));
+      return;
+    }
+    const files = Array.from(e.dataTransfer.files).filter((f) => isImageFile(f));
+    if (files.length === 0) return;
+    let next = localProducts;
+    let slot = target.slot;
+    for (const f of files) {
+      const photo = await readImageFile(f);
+      if (photo) next = next.map((p) => (p.id === target.id ? slotSet(p, slot, photo) : p));
+      slot = slot < 0 ? 0 : slot + 1;
+    }
+    commit(next);
+  };
+
+  /** Rows dropped on another row's name: they become more angles of it */
+  const dropOnRow = (e: React.DragEvent, targetId: string) => {
+    const slotData = e.dataTransfer.getData(SLOT_DRAG_TYPE);
+    if (slotData) {
+      const from = JSON.parse(slotData) as SlotRef;
+      const target = localProducts.find((p) => p.id === targetId);
+      if (!target) return;
+      // First free cell: the original, else the first empty angle column, else a new column
+      const variants = target.variants || [];
+      const emptyVariant = variants.findIndex((v) => !v);
+      const free = !target.photoDataUrl ? -1 : emptyVariant >= 0 ? emptyVariant : variants.length;
+      commit(movePhoto(localProducts, from, { id: targetId, slot: free }));
+      return;
+    }
+    const rows = e.dataTransfer.getData(PRODUCT_DRAG_TYPE);
+    if (rows) commit(mergeInto(localProducts, JSON.parse(rows) as string[], targetId));
+  };
+
+  /** Rows dropped on a group header: they move into that group */
+  const dropOnGroup = (e: React.DragEvent, title: string) => {
+    const rows = e.dataTransfer.getData(PRODUCT_DRAG_TYPE);
+    if (rows) commit(setCategory(localProducts, JSON.parse(rows) as string[], title));
+  };
+
+  const groups = groupByCategory(localProducts);
+
   return (
     <div
         id="drawer-products-panel"
@@ -440,7 +543,20 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
             checked={localProducts.length > 0 && selectedIds.size === localProducts.length}
             onChange={(e) => setSelectedIds(e.target.checked ? new Set(localProducts.map((p) => p.id)) : new Set())}
           />
-          <span>Выбрано {selectedIds.size} — выделенные перетаскиваются на доску вместе</span>
+          <span>Выбрано {selectedIds.size} — выделенные перетаскиваются вместе</span>
+          {selectedIds.size > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                const name = window.prompt('Название группы для выбранных позиций', '');
+                if (name !== null) commit(setCategory(localProducts, [...selectedIds], name));
+              }}
+              className="ml-2 underline text-[var(--fg)] cursor-pointer"
+            >
+              в группу…
+            </button>
+          )}
         </label>
         <div className="flex-1 overflow-auto">
           {localProducts.length === 0 ? (
@@ -451,7 +567,33 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
           ) : (
             <table className="w-full text-[11px]" style={{ borderSpacing: '2px', borderCollapse: 'separate' }}>
               <tbody>
-                {localProducts.map((prod, idx) => {
+                {groups.map((g) => (
+                  <React.Fragment key={g.title}>
+                    {/* Group header: drop rows here to move them into the group; double-click renames */}
+                    {(groups.length > 1 || g.title !== NO_GROUP) && (
+                      <tr {...dropHandlers(`group:${g.title}`, (e) => dropOnGroup(e, g.title))}>
+                        <td colSpan={shownCols + 3} className={`pt-3 ${dropKey === `group:${g.title}` ? 'bg-[var(--marker)]' : ''}`}>
+                          <div className="ofst-run" onDoubleClick={() => g.title !== NO_GROUP && setRenamingGroup(g.title)}>
+                            {renamingGroup === g.title ? (
+                              <input
+                                autoFocus
+                                defaultValue={g.title}
+                                onBlur={(e) => {
+                                  commit(renameCategory(localProducts, g.title, e.target.value));
+                                  setRenamingGroup(null);
+                                }}
+                                onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                                className="!bg-transparent p-0 text-[12px] w-1/2"
+                              />
+                            ) : (
+                              <span title="Двойной клик — переименовать. Перетащи сюда строки, чтобы перенести их в группу">{g.title}</span>
+                            )}
+                            <span className="tabular-nums">{g.rows.length}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                {g.rows.map(({ p: prod, index: idx }) => {
                   const variants = Array.from({ length: shownCols }, (_, i) => prod.variants?.[i] || null);
                   const finalIdx = prod.finalIndex ?? -1;
                   const dragIds = selectedIds.has(prod.id) ? [...selectedIds] : [prod.id];
@@ -483,27 +625,44 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                           }
                         />
                       </td>
-                      <td className="w-[104px]" data-position-id={prod.id} data-position-slot={-1}>
+                      <td
+                        className={`w-[104px] ${dropKey === `${prod.id}:-1` ? 'ofst-drop-target' : ''}`}
+                        data-position-id={prod.id}
+                        data-position-slot={-1}
+                        {...dropHandlers(`${prod.id}:-1`, (e) => dropOnSlot(e, { id: prod.id, slot: -1 }))}
+                      >
                         <Slot
                           src={prod.photoDataUrl}
                           label="Оригинал"
+                          dragRef={{ id: prod.id, slot: -1 }}
                           isFinal={finalIdx === -1}
                           onPick={() => handleTriggerUpload(idx)}
                           onMarkFinal={() => setFinal(idx, -1)}
                         />
                       </td>
                       {variants.map((v, vi) => (
-                        <td key={vi} className="w-[104px]" data-position-id={prod.id} data-position-slot={vi}>
+                        <td
+                          key={vi}
+                          className={`w-[104px] ${dropKey === `${prod.id}:${vi}` ? 'ofst-drop-target' : ''}`}
+                          data-position-id={prod.id}
+                          data-position-slot={vi}
+                          {...dropHandlers(`${prod.id}:${vi}`, (e) => dropOnSlot(e, { id: prod.id, slot: vi }))}
+                        >
                           <Slot
                             src={v || ''}
                             label={`Вариант ${vi + 1}`}
+                            dragRef={{ id: prod.id, slot: vi }}
                             isFinal={finalIdx === vi}
                             onPick={() => triggerVariantUpload(idx, vi)}
                             onMarkFinal={() => setFinal(idx, vi)}
                           />
                         </td>
                       ))}
-                      <td className="pl-1 min-w-[140px]">
+                      <td
+                        className={`pl-1 min-w-[140px] ${dropKey === `row:${prod.id}` ? 'bg-[var(--marker)]' : ''}`}
+                        title="Перетащи сюда другую строку — она станет ещё одним ракурсом этой позиции"
+                        {...dropHandlers(`row:${prod.id}`, (e) => dropOnRow(e, prod.id))}
+                      >
                         <input
                           type="text"
                           value={prod.name}
@@ -512,7 +671,6 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                           onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
                           className="w-full text-[13px] font-medium !bg-transparent py-0.5 focus:!bg-[var(--soft)]"
                         />
-                        {prod.category && <div className="text-[11px] text-[var(--grey)]">{prod.category}</div>}
                         {!prod.photoDataUrl && <div className="mt-1 text-[11px]"><mark className="bg-[var(--marker)] px-0.5">нет фото</mark></div>}
                         <div className="mt-1 flex items-center gap-3 text-[11px] text-[var(--grey)]">
                           <button onClick={() => handleDeleteRow(idx)} className="hover:bg-[var(--marker)] hover:text-[var(--fg)] cursor-pointer">удалить</button>
@@ -524,6 +682,8 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                     </tr>
                   );
                 })}
+                  </React.Fragment>
+                ))}
               </tbody>
             </table>
           )}

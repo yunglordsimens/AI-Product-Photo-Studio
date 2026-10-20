@@ -360,10 +360,32 @@ export function saveProjects(projects: Project[]): boolean {
     pendingProjectsSave = projects;
     return true;
   }
-  idbSet(STORAGE_KEY_PROJECTS, projects).catch((err) => {
+  scheduleProjectsWrite();
+  return true;
+}
+
+// Dragging a card saves on every mouse move; the database gets only the last state, a moment later.
+let projectsWriteTimer: number | null = null;
+function scheduleProjectsWrite(): void {
+  if (projectsWriteTimer !== null) window.clearTimeout(projectsWriteTimer);
+  projectsWriteTimer = window.setTimeout(flushProjectsWrite, 350);
+}
+function flushProjectsWrite(): void {
+  if (projectsWriteTimer !== null) {
+    window.clearTimeout(projectsWriteTimer);
+    projectsWriteTimer = null;
+  }
+  if (!projectsHydrated || !inMemoryProjectsCache) return;
+  idbSet(STORAGE_KEY_PROJECTS, inMemoryProjectsCache).catch((err) => {
     console.error('Failed to save projects to IndexedDB:', err);
   });
-  return true;
+}
+// Write right away when the tab is hidden or closed, so nothing waits in the timer
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushProjectsWrite);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushProjectsWrite();
+  });
 }
 
 export function getActiveProjectId(projects: Project[]): string {
