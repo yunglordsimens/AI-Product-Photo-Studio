@@ -4,6 +4,7 @@ import { compressImageDataUrl, loadGlobalProducts, saveGlobalProducts } from '..
 import { ImageCropModal } from './ImageCropModal';
 import { normalizeImageFiles, isImageFile } from '../utils/heic';
 import { PRODUCT_DRAG_TYPE } from '../utils/dragTypes';
+import { folderFilesFromInput, groupByFolder } from '../utils/folderImport';
 import { EXPORT_PRESETS, ExportPhotos, ExportPreset, exportPositions } from '../utils/positionsExport';
 import { NO_GROUP, SLOT_DRAG_TYPE, SlotRef, groupByCategory, mergeInto, movePhoto, renameCategory, setCategory, slotSet } from '../utils/positions';
 
@@ -150,8 +151,6 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
     setLocalProducts(products || []);
   }, [products, isOpen]);
 
-  if (!isOpen) return null;
-
   // Columns: the chosen number, or more if some position already has more variants (e.g. dropped from the board)
   const shownCols = Math.max(variantCols, ...localProducts.map((p) => p.variants?.length || 0));
 
@@ -240,33 +239,43 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
   const handleBatchPhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked: File[] = e.target.files ? Array.from(e.target.files) : [];
     e.target.value = '';
-    const images = await normalizeImageFiles(picked.filter((f) => isImageFile(f) && !f.name.startsWith('.')));
-    if (images.length === 0) return;
+    // Each subfolder becomes a group of positions, the same as dropping the folder on the board
+    const folders = groupByFolder(folderFilesFromInput(picked.filter((f) => isImageFile(f) && !f.name.startsWith('.'))));
+    const total = folders.reduce((n, g) => n + g.files.length, 0);
+    if (total === 0) return;
     let next = [...localProducts];
     let added = 0;
     let filled = 0;
-    for (let i = 0; i < images.length; i++) {
-      setBatchNote(`Фото ${i + 1} из ${images.length}…`);
-      const raw = await new Promise<string>((resolve) => {
-        const r = new FileReader();
-        r.onload = () => resolve(r.result as string);
-        r.onerror = () => resolve('');
-        r.readAsDataURL(images[i]);
-      });
-      if (!raw) continue;
-      const photo = await compressImageDataUrl(raw, 1200, 0.85);
-      const name = images[i].name.replace(/\.[^.]+$/, '');
-      const idx = next.findIndex((p) => normName(p.name) === normName(name));
-      if (idx >= 0) {
-        next[idx] = { ...next[idx], photoDataUrl: photo };
-        filled++;
-      } else {
-        next.push({ id: `prod_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`, name, photoDataUrl: photo });
-        added++;
+    let done = 0;
+    const single = folders.length === 1;
+    for (const g of folders) {
+      const images = await normalizeImageFiles(g.files.map((f) => f.file));
+      for (let i = 0; i < images.length; i++) {
+        setBatchNote(`Фото ${++done} из ${total}…`);
+        const raw = await new Promise<string>((resolve) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as string);
+          r.onerror = () => resolve('');
+          r.readAsDataURL(images[i]);
+        });
+        if (!raw) continue;
+        const photo = await compressImageDataUrl(raw, 1200, 0.85);
+        const name = images[i].name.replace(/\.[^.]+$/, '');
+        const category = single ? undefined : g.name;
+        const idx = next.findIndex((p) => normName(p.name) === normName(name));
+        if (idx >= 0) {
+          next[idx] = { ...next[idx], photoDataUrl: photo, category: next[idx].category || category };
+          filled++;
+        } else {
+          next.push({ id: `prod_${Date.now()}_${done}_${Math.random().toString(36).substr(2, 4)}`, name, photoDataUrl: photo, category });
+          added++;
+        }
       }
     }
     commit(next);
-    setBatchNote(`Готово: новых ${added}, фото добавлено к существующим ${filled}.`);
+    setBatchNote(
+      `Готово: новых ${added}, фото добавлено к существующим ${filled}${single ? '' : `, групп по папкам: ${folders.length}`}.`
+    );
   };
 
   const handleBatchList = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -416,9 +425,70 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
 
   const groups = groupByCategory(localProducts);
 
+  // ⌘G / Ctrl+G with ticked rows: type a group name, Enter puts them there and clears the ticks
+  const [namingGroup, setNamingGroup] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const applyGroupName = (name: string) => {
+    const n = name.trim();
+    if (n) {
+      commit(setCategory(localProducts, [...selectedIds], n));
+      setSelectedIds(new Set());
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        next.delete(n);
+        return next;
+      });
+    }
+    setNamingGroup(false);
+  };
+
+  // Folded groups, remembered in this browser
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem('aips_collapsed_groups') || '[]'));
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleCollapsed = (title: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(title)) next.delete(title);
+      else next.add(title);
+      try {
+        localStorage.setItem('aips_collapsed_groups', JSON.stringify([...next]));
+      } catch {}
+      return next;
+    });
+  const toggleGroupSelection = (ids: string[]) =>
+    setSelectedIds((prev) => {
+      const all = ids.every((id) => prev.has(id));
+      const next = new Set(prev);
+      ids.forEach((id) => (all ? next.delete(id) : next.add(id)));
+      return next;
+    });
+
+  // ⌘G inside the panel (hovered or focused) groups the ticked rows; the board's ⌘G is left alone then
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'g' || e.shiftKey) return;
+      const panel = panelRef.current;
+      if (!panel || !(panel.matches(':hover') || panel.contains(document.activeElement))) return;
+      if (selectedIds.size === 0) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setNamingGroup(true);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [selectedIds]);
+
+  if (!isOpen) return null;
+
   return (
     <div
         id="drawer-products-panel"
+        ref={panelRef}
         className="ofst-panel h-full flex flex-col select-text"
         onClick={(e) => e.stopPropagation()}
       >
@@ -549,12 +619,12 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
               type="button"
               onClick={(e) => {
                 e.preventDefault();
-                const name = window.prompt('Название группы для выбранных позиций', '');
-                if (name !== null) commit(setCategory(localProducts, [...selectedIds], name));
+                setNamingGroup(true);
               }}
               className="ml-2 underline text-[var(--fg)] cursor-pointer"
+              title="⌘G"
             >
-              в группу…
+              в группу… ⌘G
             </button>
           )}
           {selectedIds.size > 0 && (
@@ -572,6 +642,27 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
             </button>
           )}
         </label>
+        {namingGroup && (
+          <div className="mx-2 mb-1 flex items-center gap-1 bg-[var(--marker)] px-2 py-1 text-[13px] ofst-pop">
+            <span className="shrink-0">Группа для {selectedIds.size}:</span>
+            <input
+              autoFocus
+              list="positions-group-names"
+              placeholder="название, Enter"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') applyGroupName((e.target as HTMLInputElement).value);
+                if (e.key === 'Escape') setNamingGroup(false);
+              }}
+              onBlur={(e) => applyGroupName(e.target.value)}
+              className="flex-1 h-7 px-2 !bg-white text-[13px]"
+            />
+            <datalist id="positions-group-names">
+              {groups.filter((g) => g.title !== NO_GROUP).map((g) => (
+                <option key={g.title} value={g.title} />
+              ))}
+            </datalist>
+          </div>
+        )}
         <div className="flex-1 overflow-auto">
           {localProducts.length === 0 ? (
             <div className="px-2 pt-4">
@@ -587,7 +678,22 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                     {(groups.length > 1 || g.title !== NO_GROUP) && (
                       <tr {...dropHandlers(`group:${g.title}`, (e) => dropOnGroup(e, g.title))}>
                         <td colSpan={shownCols + 3} className={`pt-3 ${dropKey === `group:${g.title}` ? 'bg-[var(--marker)]' : ''}`}>
-                          <div className="ofst-run" onDoubleClick={() => g.title !== NO_GROUP && setRenamingGroup(g.title)}>
+                          <div className="ofst-run !text-[13px] !items-center" onDoubleClick={() => g.title !== NO_GROUP && setRenamingGroup(g.title)}>
+                            <span className="flex items-center gap-1.5 !text-[var(--fg)]">
+                              <input
+                                type="checkbox"
+                                checked={g.rows.every((r) => selectedIds.has(r.p.id))}
+                                onChange={() => toggleGroupSelection(g.rows.map((r) => r.p.id))}
+                                title="Выбрать всю группу"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => toggleCollapsed(g.title)}
+                                className="w-4 text-left cursor-pointer"
+                                title={collapsed.has(g.title) ? 'Развернуть' : 'Свернуть'}
+                              >
+                                {collapsed.has(g.title) ? '▸' : '▾'}
+                              </button>
                             {renamingGroup === g.title ? (
                               <input
                                 autoFocus
@@ -600,16 +706,18 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                                 className="!bg-transparent p-0 text-[12px] w-1/2"
                               />
                             ) : (
-                              <span title="Двойной клик — переименовать. Перетащи сюда строки, чтобы перенести их в группу">{g.title}</span>
+                              <span className="font-medium" title="Двойной клик — переименовать. Перетащи сюда строки, чтобы перенести их в группу">{g.title}</span>
                             )}
+                            </span>
                             <span className="tabular-nums">{g.rows.length}</span>
                           </div>
                         </td>
                       </tr>
                     )}
-                {g.rows.map(({ p: prod, index: idx }) => {
+                {!collapsed.has(g.title) && g.rows.map(({ p: prod, index: idx }) => {
                   const variants = Array.from({ length: shownCols }, (_, i) => prod.variants?.[i] || null);
-                  const finalIdx = prod.finalIndex ?? -1;
+                  // ★ shows only once a final photo was actually chosen (export falls back to the original anyway)
+                  const finalIdx = prod.finalIndex ?? -2;
                   const dragIds = selectedIds.has(prod.id) ? [...selectedIds] : [prod.id];
                   return (
                     <tr

@@ -65,6 +65,7 @@ input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="
   border-color: transparent;
 }
 input:focus, textarea:focus, select:focus { outline: 1px solid var(--fg); outline-offset: -1px; }
+input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color: var(--fg); }
 ::selection { background: var(--marker); color: var(--fg); }
 
 /* Shared OFST pieces. In the components layer, so Tailwind utilities (hidden, justify-start…) can still override them. */
