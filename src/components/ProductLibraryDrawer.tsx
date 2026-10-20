@@ -557,6 +557,20 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
               в группу…
             </button>
           )}
+          {selectedIds.size > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                if (!window.confirm(`Удалить выбранные позиции (${selectedIds.size})?`)) return;
+                commit(localProducts.filter((p) => !selectedIds.has(p.id)));
+                setSelectedIds(new Set());
+              }}
+              className="ml-3 underline text-[var(--fg)] hover:bg-[var(--marker)] cursor-pointer"
+            >
+              удалить выбранные
+            </button>
+          )}
         </label>
         <div className="flex-1 overflow-auto">
           {localProducts.length === 0 ? (

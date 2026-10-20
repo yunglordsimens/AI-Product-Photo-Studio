@@ -76,7 +76,15 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [notice, setNotice] = useState<{ kind: 'error' | 'info'; text: string } | null>(null);
   const [isDescribing, setIsDescribing] = useState(false);
-  const [compareId, setCompareId] = useState<string | null>(null);
+  const [compareId, setCompareIdState] = useState<string | null>(null);
+  // Position in the "после" stack (0 = current take) and in the "до" stack (0 = current source)
+  const [afterIdx, setAfterIdx] = useState(0);
+  const [beforeIdx, setBeforeIdx] = useState(0);
+  const setCompareId = (id: string | null) => {
+    setCompareIdState(id);
+    setAfterIdx(0);
+    setBeforeIdx(0);
+  };
   const [showProductPicker, setShowProductPicker] = useState(false);
 
   const stopRef = useRef(false);
@@ -269,7 +277,27 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
     return version;
   };
 
-  const run = async (itemIds: string[]) => {
+  // A new take goes on top; the previous one stays in the item's history (newest first)
+  const pushTake = useCallback(
+    (itemId: string, versionId: string, src: string) => {
+      update((prev) => ({
+        ...prev,
+        items: prev.items.map((it) => {
+          if (it.id !== itemId) return it;
+          const old = it.results[versionId];
+          const history = old?.src ? [old.src, ...(old.history || [])].slice(0, 12) : old?.history || [];
+          return {
+            ...it,
+            results: { ...it.results, [versionId]: { ...old, src, history, status: 'done', error: undefined, updatedAt: Date.now() } },
+          };
+        }),
+      }));
+    },
+    [update]
+  );
+
+  /** `fresh` lets a caller pass items it has just changed (e.g. a new source) before state catches up */
+  const run = async (itemIds: string[], fresh?: CatalogItem[]) => {
     if (isRunning || itemIds.length === 0) return;
     if (!hasGenerationAccess()) return onOpenSettings();
     if (catalog.refs.length === 0) {
@@ -283,7 +311,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
 
     const version = ensureVersion();
     const refs = catalog.refs;
-    const items = catalog.items.filter((it) => itemIds.includes(it.id));
+    const items = (fresh || catalog.items).filter((it) => itemIds.includes(it.id));
     const queue = [...items];
 
     stopRef.current = false;
@@ -298,7 +326,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
         const item = queue.shift()!;
         try {
           const src = await withRetry(() => generateCatalogShot(item, version, refs));
-          setResult(item.id, version.id, { status: 'done', src, error: undefined });
+          pushTake(item.id, version.id, src);
         } catch (err) {
           failed++;
           const message = err instanceof Error ? err.message : String(err);
@@ -411,6 +439,60 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
       return next;
     });
 
+  // ---------- Stacks in the compare view ----------
+  const afterStack = (it: CatalogItem): string[] => {
+    const r = activeVersion ? it.results[activeVersion.id] : undefined;
+    return [r?.src, ...(r?.history || [])].filter((x): x is string => Boolean(x));
+  };
+  const beforeStack = (it: CatalogItem): string[] => [it.original, ...(it.originalHistory || [])];
+
+  /** ★ the take being shown: it becomes the current one (the others stay in the stack) */
+  const chooseTake = (itemId: string, idx: number) => {
+    if (!activeVersion) return;
+    update((prev) => ({
+      ...prev,
+      items: prev.items.map((it) => {
+        if (it.id !== itemId) return it;
+        const r = it.results[activeVersion.id];
+        if (!r?.src) return it;
+        const stack = [r.src, ...(r.history || [])];
+        const chosen = stack[idx];
+        if (!chosen) return it;
+        const rest = stack.filter((_, i) => i !== idx);
+        const approved = idx === 0 ? !r.approved : true;
+        return { ...it, results: { ...it.results, [activeVersion.id]: { ...r, src: chosen, history: rest, approved, updatedAt: Date.now() } } };
+      }),
+    }));
+    setAfterIdx(0);
+  };
+
+  /** The take being shown becomes the new source («до»); the old source goes up its stack; then a new take is made */
+  const promoteToSource = (itemId: string, idx: number) => {
+    const it = catalog.items.find((i) => i.id === itemId);
+    const src = it ? afterStack(it)[idx] : undefined;
+    if (!it || !src) return;
+    const updated: CatalogItem = { ...it, original: src, originalHistory: [it.original, ...(it.originalHistory || [])].slice(0, 12) };
+    update((prev) => ({ ...prev, items: prev.items.map((x) => (x.id === itemId ? updated : x)) }));
+    setBeforeIdx(0);
+    setAfterIdx(0);
+    run([itemId], catalog.items.map((x) => (x.id === itemId ? updated : x)));
+  };
+
+  /** Go back to an earlier source */
+  const restoreSource = (itemId: string, idx: number) => {
+    update((prev) => ({
+      ...prev,
+      items: prev.items.map((it) => {
+        if (it.id !== itemId) return it;
+        const stack = [it.original, ...(it.originalHistory || [])];
+        const chosen = stack[idx];
+        if (!chosen) return it;
+        return { ...it, original: chosen, originalHistory: stack.filter((_, i) => i !== idx) };
+      }),
+    }));
+    setBeforeIdx(0);
+  };
+
   // Keyboard in compare view
   const compareIndex = compareId ? catalog.items.findIndex((i) => i.id === compareId) : -1;
   useEffect(() => {
@@ -419,12 +501,20 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
       if (e.key === 'Escape') setCompareId(null);
       if (e.key === 'ArrowRight' && compareIndex < catalog.items.length - 1) setCompareId(catalog.items[compareIndex + 1].id);
       if (e.key === 'ArrowLeft' && compareIndex > 0) setCompareId(catalog.items[compareIndex - 1].id);
-      if (e.key.toLowerCase() === 'a') toggleApprove(compareId);
+      const it = catalog.items.find((i) => i.id === compareId);
+      if (!it) return;
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        if (e.shiftKey) setBeforeIdx((i) => Math.max(0, Math.min(beforeStack(it).length - 1, i + step)));
+        else setAfterIdx((i) => Math.max(0, Math.min(afterStack(it).length - 1, i + step)));
+      }
+      if (e.key.toLowerCase() === 'a' || e.key === 'ф' || e.key === 'Ф') chooseTake(compareId, afterIdx);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [compareId, compareIndex, catalog.items, activeVersion]);
+  }, [compareId, compareIndex, catalog.items, activeVersion, afterIdx]);
 
   if (!isOpen) return null;
 
@@ -679,6 +769,19 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                   {selectedIds.size === catalog.items.length ? 'Снять выбор' : 'Выбрать все'}
                 </button>
               )}
+              {selectedIds.size > 0 && (
+                <button
+                  onClick={() => {
+                    if (!window.confirm(`Убрать из каталога выбранные (${selectedIds.size})?`)) return;
+                    update((prev) => ({ ...prev, items: prev.items.filter((i) => !selectedIds.has(i.id)) }));
+                    setSelectedIds(new Set());
+                  }}
+                  disabled={isRunning}
+                  className="ofst-cell hover:!bg-[var(--marker)]"
+                >
+                  Убрать выбранные ({selectedIds.size})
+                </button>
+              )}
               <button
                 onClick={exportZip}
                 disabled={!activeVersion || stats.done === 0}
@@ -731,6 +834,11 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                           aria-label="Выбрать"
                         />
                         <span className="tabular-nums text-[var(--grey)] shrink-0">{String(idx + 1).padStart(2, '0')}</span>
+                        {(r?.history?.length || 0) > 0 && (
+                          <span className="text-[var(--grey)] shrink-0" title="Сколько дублей в стопке «после»">
+                            ×{(r?.history?.length || 0) + 1}
+                          </span>
+                        )}
                         <input
                           value={item.name}
                           onChange={(e) => renameItem(item.id, e.target.value)}
@@ -760,55 +868,110 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
         </main>
       </div>
 
-      {/* Compare view: white paper, two images side by side */}
-      {compareItem && (
-        <div className="fixed inset-0 z-[60] bg-white flex flex-col p-2 gap-1" onClick={() => setCompareId(null)}>
-          <div className="shrink-0 ofst-run" onClick={(e) => e.stopPropagation()}>
-            <span className="truncate">
-              {compareIndex + 1}/{catalog.items.length} · {compareItem.name}
+      {/* Compare view: «до» and «после» side by side; each side is a stack to flip through (↑ ↓, Shift for «до») */}
+      {compareItem && (() => {
+        const after = afterStack(compareItem);
+        const before = beforeStack(compareItem);
+        const aIdx = Math.min(afterIdx, Math.max(0, after.length - 1));
+        const bIdx = Math.min(beforeIdx, before.length - 1);
+        const shownAfter = after[aIdx];
+        const isRunningNow = compareResult?.status === 'running';
+        const stepper = (idx: number, total: number, set: (n: number) => void, label: string) => (
+          <span className="flex items-center">
+            <button onClick={() => set(Math.max(0, idx - 1))} disabled={idx === 0} className="ofst-cell !h-6 w-6" aria-label={`${label}: новее`}>
+              ↑
+            </button>
+            <span className="tabular-nums px-1">
+              {total ? idx + 1 : 0}/{total}
             </span>
-            <span className="flex gap-3">
-              <button onClick={() => toggleApprove(compareItem.id)} disabled={compareResult?.status !== 'done'} className="hover:text-[var(--fg)] disabled:opacity-40">
-                {compareResult?.approved ? '★ одобрено' : 'одобрить (A)'}
-              </button>
-              <button onClick={() => run([compareItem.id])} disabled={isRunning} className="hover:text-[var(--fg)] disabled:opacity-40">
-                ещё раз
-              </button>
+            <button onClick={() => set(Math.min(total - 1, idx + 1))} disabled={idx >= total - 1} className="ofst-cell !h-6 w-6" aria-label={`${label}: старее`}>
+              ↓
+            </button>
+          </span>
+        );
+        return (
+          <div className="fixed inset-0 z-[60] bg-white flex flex-col p-2 gap-1 ofst-fade">
+            <div className="shrink-0 ofst-run">
+              <span className="truncate">
+                {compareIndex + 1}/{catalog.items.length} · {compareItem.name}
+              </span>
+              <span>← → позиции · ↑ ↓ дубли · Shift ↑ ↓ исходники · A выбрать</span>
               <button onClick={() => setCompareId(null)} className="hover:text-[var(--fg)]" aria-label="Закрыть">
                 закрыть
               </button>
-            </span>
-          </div>
-          <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 gap-0.5 overflow-auto md:overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <BigImage src={compareItem.original} label="до" />
-            {compareResult?.status === 'done' && compareResult.src ? (
-              <BigImage src={compareResult.src} label={`после · ${activeVersion?.label}`} />
-            ) : (
-              <div className="min-h-[40vh] md:min-h-0 flex items-center justify-center bg-[var(--soft)] text-[var(--grey)] text-[13px] p-4 text-center">
-                {compareResult?.status === 'running' ? 'генерация…' : compareResult?.error || 'Ещё не прогнано'}
+            </div>
+            <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 gap-0.5 overflow-auto md:overflow-hidden">
+              {/* до */}
+              <div className="flex flex-col min-h-[40vh] md:min-h-0">
+                <div className="flex items-center justify-between text-[12px] h-7">
+                  <span>до{bIdx > 0 ? ' · прежний исходник' : ''}</span>
+                  <span className="flex items-center">
+                    {bIdx > 0 && (
+                      <button onClick={() => restoreSource(compareItem.id, bIdx)} className="ofst-cell !h-6">
+                        вернуть этот исходник
+                      </button>
+                    )}
+                    {before.length > 1 && stepper(bIdx, before.length, setBeforeIdx, 'исходник')}
+                  </span>
+                </div>
+                <BigImage src={before[bIdx]} label="" />
               </div>
-            )}
+              {/* после */}
+              <div className="flex flex-col min-h-[40vh] md:min-h-0">
+                <div className="flex items-center justify-between text-[12px] h-7">
+                  <span>
+                    после · {activeVersion?.label}
+                    {aIdx === 0 && compareResult?.approved ? ' · ★ выбран' : ''}
+                    {aIdx > 0 ? ' · прежний дубль' : ''}
+                  </span>
+                  <span className="flex items-center">
+                    {shownAfter && (
+                      <button onClick={() => chooseTake(compareItem.id, aIdx)} className={`ofst-cell !h-6 ${aIdx === 0 && compareResult?.approved ? 'is-on' : ''}`} title="A">
+                        ★ {aIdx === 0 && compareResult?.approved ? 'выбран' : 'выбрать'}
+                      </button>
+                    )}
+                    <button onClick={() => run([compareItem.id])} disabled={isRunning} className="ofst-cell !h-6" title="Новый дубль ляжет сверху, этот останется в стопке">
+                      ещё дубль
+                    </button>
+                    {shownAfter && (
+                      <button
+                        onClick={() => promoteToSource(compareItem.id, aIdx)}
+                        disabled={isRunning}
+                        className="ofst-cell !h-6"
+                        title="Этот кадр станет исходником («до»), старый исходник уйдёт в стопку, и сразу сделается новый дубль"
+                      >
+                        ← в «до» и заново
+                      </button>
+                    )}
+                    {after.length > 1 && stepper(aIdx, after.length, setAfterIdx, 'дубль')}
+                  </span>
+                </div>
+                {isRunningNow && aIdx === 0 ? (
+                  <div className="flex-1 flex items-center justify-center bg-[var(--soft)] text-[var(--grey)] text-[13px]">генерация…</div>
+                ) : shownAfter ? (
+                  <BigImage src={shownAfter} label="" />
+                ) : (
+                  <div className="flex-1 flex items-center justify-center bg-[var(--soft)] text-[var(--grey)] text-[13px] p-4 text-center">
+                    {compareResult?.error || 'Ещё не прогнано'}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="shrink-0 flex justify-between">
+              <button onClick={() => compareIndex > 0 && setCompareId(catalog.items[compareIndex - 1].id)} disabled={compareIndex <= 0} className="ofst-cell">
+                ← назад
+              </button>
+              <button
+                onClick={() => compareIndex < catalog.items.length - 1 && setCompareId(catalog.items[compareIndex + 1].id)}
+                disabled={compareIndex >= catalog.items.length - 1}
+                className="ofst-cell"
+              >
+                дальше →
+              </button>
+            </div>
           </div>
-          <div className="shrink-0 flex justify-between" onClick={(e) => e.stopPropagation()}>
-            <button
-              onClick={() => compareIndex > 0 && setCompareId(catalog.items[compareIndex - 1].id)}
-              disabled={compareIndex <= 0}
-              className="ofst-cell"
-              aria-label="Предыдущее"
-            >
-              ← назад
-            </button>
-            <button
-              onClick={() => compareIndex < catalog.items.length - 1 && setCompareId(catalog.items[compareIndex + 1].id)}
-              disabled={compareIndex >= catalog.items.length - 1}
-              className="ofst-cell"
-              aria-label="Следующее"
-            >
-              дальше →
-            </button>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Product picker */}
       {showProductPicker && (
@@ -901,9 +1064,9 @@ function Thumb({ src, label, ratio, onOpen }: { src: string; label: string; rati
 
 function BigImage({ src, label }: { src: string; label: string }) {
   return (
-    <div className="relative min-h-[40vh] md:min-h-0 h-full bg-[var(--soft)] overflow-hidden">
-      <img src={src} alt={label} className="absolute inset-0 w-full h-full object-contain" />
-      <span className="absolute left-0 top-0 text-[12px] bg-white px-1">{label}</span>
+    <div className="relative flex-1 min-h-[40vh] md:min-h-0 bg-[var(--soft)] overflow-hidden">
+      <img src={src} alt={label} className="absolute inset-0 w-full h-full object-contain ofst-fade" key={src.slice(-40)} />
+      {label && <span className="absolute left-0 top-0 text-[12px] bg-white px-1">{label}</span>}
     </div>
   );
 }

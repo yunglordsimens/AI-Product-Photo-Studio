@@ -24,6 +24,8 @@ export interface CatalogResult {
   status: ResultStatus;
   error?: string;
   approved?: boolean;
+  /** Earlier takes for this item in this version, newest first (src is the current / chosen one) */
+  history?: string[];
   updatedAt: number;
 }
 
@@ -31,6 +33,8 @@ export interface CatalogItem {
   id: string;
   name: string;
   original: string; // data URL (compressed)
+  /** Earlier sources, newest first: a result moved into «до» pushes the old source here */
+  originalHistory?: string[];
   results: Record<string, CatalogResult>; // by version id
 }
 
