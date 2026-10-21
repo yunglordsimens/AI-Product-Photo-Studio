@@ -286,7 +286,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           {projectName} · {cardCount} фото
           {selectedCount > 0 && <span className="ml-1 text-[var(--fg)]">· выбрано {selectedCount}</span>}
         </span>
-        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.12 · 21.10</span>
+        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.13 · 21.10</span>
       </div>
 
       {/* Tools: text cells, reorderable by drag */}

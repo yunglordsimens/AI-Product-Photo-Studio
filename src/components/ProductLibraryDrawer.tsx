@@ -9,6 +9,9 @@ import { EXPORT_PRESETS, ExportPhotos, ExportPreset, exportPositions } from '../
 import { NO_GROUP, SLOT_DRAG_TYPE, SlotRef, groupByCategory, mergeInto, movePhoto, renameCategory, setCategory, slotSet } from '../utils/positions';
 
 /** One square photo slot in the positions table; ★ marks the final photo of the row. */
+/** Positions copied with ⌘C / ⌘X; kept across projects so they can be pasted into another one */
+let positionsClipboard: { id: string; items: ProductItem[] } | null = null;
+
 const Slot: React.FC<{
   src: string;
   label: string;
@@ -507,6 +510,64 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIds, localProducts]);
+
+  // ⌘C / ⌘X / ⌘V over the panel: copy, cut and paste ticked positions (also into another project);
+  // a picture pasted here becomes a new position
+  useEffect(() => {
+    const active = (e: ClipboardEvent) => {
+      const panel = panelRef.current;
+      const t = e.target as HTMLElement;
+      if (!panel || !panel.matches(':hover')) return false;
+      if ((t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'checkbox') || t.tagName === 'TEXTAREA' || t.isContentEditable) return false;
+      return true;
+    };
+    const onCopyOrCut = (e: ClipboardEvent) => {
+      if (!active(e) || selectedIds.size === 0) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const id = Math.random().toString(36).slice(2, 10);
+      positionsClipboard = { id, items: localProducts.filter((p) => selectedIds.has(p.id)) };
+      e.clipboardData?.setData('text/plain', `aips-positions:${id}`);
+      if (e.type === 'cut') {
+        commit(localProducts.filter((p) => !selectedIds.has(p.id)));
+        setSelectedIds(new Set());
+      }
+      setBatchNote(`${e.type === 'cut' ? 'Вырезано' : 'Скопировано'} позиций: ${positionsClipboard.items.length}. ⌘V — вставить (можно в другом проекте).`);
+    };
+    const onPaste = async (e: ClipboardEvent) => {
+      if (!active(e)) return;
+      const marker = e.clipboardData?.getData('text/plain') || '';
+      if (positionsClipboard && marker === `aips-positions:${positionsClipboard.id}`) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const stamp = Date.now();
+        const copies = positionsClipboard.items.map((p, i) => ({ ...p, id: `prod_${stamp}_${i}_${Math.random().toString(36).slice(2, 6)}` }));
+        commit([...localProducts, ...copies]);
+        setBatchNote(`Вставлено позиций: ${copies.length}.`);
+        return;
+      }
+      const files = Array.from(e.clipboardData?.files || []).filter((f) => isImageFile(f) || f.type.startsWith('image/'));
+      if (files.length === 0) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const time = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+      const added: ProductItem[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const photo = await readImageFile(files[i]);
+        if (photo) added.push({ id: `prod_${Date.now()}_${i}`, name: `Вставка ${time}${i ? ` ${i + 1}` : ''}`, photoDataUrl: photo });
+      }
+      if (added.length) commit([...localProducts, ...added]);
+    };
+    window.addEventListener('copy', onCopyOrCut, true);
+    window.addEventListener('cut', onCopyOrCut, true);
+    window.addEventListener('paste', onPaste, true);
+    return () => {
+      window.removeEventListener('copy', onCopyOrCut, true);
+      window.removeEventListener('cut', onCopyOrCut, true);
+      window.removeEventListener('paste', onPaste, true);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIds, localProducts]);
 
