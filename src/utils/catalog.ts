@@ -208,6 +208,39 @@ export async function generateCatalogShot(
   return `data:${image.mimeType};base64,${image.base64}`;
 }
 
+/** Edit one take by words («фон темнее», «убери крошки»): same photo, only the asked change */
+export async function editCatalogShot(src: string, instruction: string, version: CatalogVersion): Promise<string> {
+  const task = instruction.replace('[ИСПРАВИТЬ ИСХОДНИК]', '').trim();
+  const payload = {
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          {
+            text:
+              'Отредактируй приложенное фото. Это то же самое фото того же предмета: ничего не придумывай, не меняй форму, пропорции, цвет, материал, надписи и логотипы предмета, не добавляй новых объектов, кадр и стиль оставь. ' +
+              `Измени только это: ${task}`,
+          },
+          inline(src),
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: Math.min(version.temperature, 0.4),
+      topP: 0.9,
+      responseModalities: ['IMAGE', 'TEXT'],
+      imageConfig: { aspectRatio: version.aspectRatio },
+    },
+  };
+  const json = await callGemini(version.model || getImageModel(), payload);
+  const image = extractImageFromResponse(json);
+  if (!image) {
+    const text = extractTextFromResponse(json);
+    throw new Error(text ? `Модель ответила текстом: ${text.slice(0, 140)}` : 'Модель не вернула фото');
+  }
+  return `data:${image.mimeType};base64,${image.base64}`;
+}
+
 /** Retries rate limits and transient server errors with backoff. */
 export async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   let lastErr: unknown;

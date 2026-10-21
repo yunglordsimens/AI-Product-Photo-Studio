@@ -5,7 +5,7 @@ import { ImageCropModal } from './ImageCropModal';
 import { normalizeImageFiles, isImageFile } from '../utils/heic';
 import { PRODUCT_DRAG_TYPE } from '../utils/dragTypes';
 import { folderFilesFromInput, groupByFolder } from '../utils/folderImport';
-import { EXPORT_PRESETS, ExportPhotos, ExportPreset, exportPositions } from '../utils/positionsExport';
+import { EXPORT_PRESETS, EXPORT_SIZES, ExportPhotos, ExportPreset, ExportSize, FitMode, exportPositions } from '../utils/positionsExport';
 import { NO_GROUP, SLOT_DRAG_TYPE, SlotRef, groupByCategory, mergeInto, movePhoto, renameCategory, setCategory, slotSet } from '../utils/positions';
 
 /** One square photo slot in the positions table; ★ marks the final photo of the row. */
@@ -132,6 +132,12 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
   const [exportPreset, setExportPreset] = useState<ExportPreset>('names');
   const [exportPhotos, setExportPhotos] = useState<ExportPhotos>('final');
   const [exportBaseUrl, setExportBaseUrl] = useState('');
+  const [exportSizeIds, setExportSizeIds] = useState<string[]>([]);
+  const [exportCustom, setExportCustom] = useState('');
+  const [exportKeepOriginal, setExportKeepOriginal] = useState(true);
+  const [exportFit, setExportFit] = useState<FitMode>('cover');
+  const [exportBg, setExportBg] = useState('#ffffff');
+  const [isExporting, setIsExporting] = useState(false);
   const [localProducts, setLocalProducts] = useState<ProductItem[]>(products || []);
   const [activeUploadIndex, setActiveUploadIndex] = useState<number | null>(null);
   const [cropModalState, setCropModalState] = useState<{
@@ -654,6 +660,50 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                 </button>
               ))}
             </div>
+            {/* Sizes for platforms: each chosen size becomes a folder in the ZIP */}
+            <div>
+              <div className="flex flex-wrap items-center -ml-2">
+                <span className="text-[12px] text-[var(--grey)] px-2">Размеры</span>
+                <button onClick={() => setExportKeepOriginal((v) => !v)} className={`ofst-cell !h-7 ${exportKeepOriginal ? 'is-on' : 'ofst-cell--muted'}`}>
+                  как есть
+                </button>
+                {EXPORT_SIZES.map((sz) => {
+                  const on = exportSizeIds.includes(sz.id);
+                  return (
+                    <button
+                      key={sz.id}
+                      onClick={() => setExportSizeIds((prev) => (on ? prev.filter((x) => x !== sz.id) : [...prev, sz.id]))}
+                      className={`ofst-cell !h-7 ${on ? 'is-on' : 'ofst-cell--muted'}`}
+                    >
+                      {sz.label}
+                    </button>
+                  );
+                })}
+                <input
+                  value={exportCustom}
+                  onChange={(e) => setExportCustom(e.target.value)}
+                  placeholder="свой: 1000×1000"
+                  className="w-[110px] h-7 px-1 ml-1 !bg-white text-[12px]"
+                  aria-label="Свой размер, ширина × высота"
+                />
+              </div>
+              {(exportSizeIds.length > 0 || exportCustom.trim()) && (
+                <div className="flex flex-wrap items-center -ml-2 pt-0.5">
+                  <button onClick={() => setExportFit('cover')} className={`ofst-cell !h-7 ${exportFit === 'cover' ? 'is-on' : 'ofst-cell--muted'}`}>
+                    обрезать по центру
+                  </button>
+                  <button onClick={() => setExportFit('contain')} className={`ofst-cell !h-7 ${exportFit === 'contain' ? 'is-on' : 'ofst-cell--muted'}`}>
+                    вписать на фон
+                  </button>
+                  {exportFit === 'contain' && (
+                    <input type="color" value={exportBg} onChange={(e) => setExportBg(e.target.value)} className="w-7 h-7 ml-1 cursor-pointer" aria-label="Цвет фона" />
+                  )}
+                </div>
+              )}
+              <p className="text-[12px] text-[var(--grey)] pt-0.5">
+                Каждый размер — своя папка в ZIP, имена файлов те же. Требования Wolt, Bolt Food, Foodora меняются — сверься с их кабинетом.
+              </p>
+            </div>
             {exportPreset !== 'names' && (
               <label className="block">
                 <span className="text-[12px] text-[var(--grey)]">Адрес папки с фото, если уже залиты (необязательно)</span>
@@ -670,15 +720,36 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                 Отмена
               </button>
               <button
-                disabled={localProducts.length === 0}
-                onClick={() => {
-                  const r = exportPositions(localProducts, { preset: exportPreset, photos: exportPhotos, baseUrl: exportBaseUrl, projectName });
-                  setBatchNote(r.missing.length ? `Скачан ZIP. Без фото: ${r.missing.slice(0, 6).join(', ')}${r.missing.length > 6 ? '…' : ''}` : 'Скачан ZIP с позициями и фото.');
-                  setShowExport(false);
+                disabled={localProducts.length === 0 || isExporting}
+                onClick={async () => {
+                  const sizes: ExportSize[] = EXPORT_SIZES.filter((sz) => exportSizeIds.includes(sz.id));
+                  const m = exportCustom.match(/(\d{2,5})\s*[x×хX*]\s*(\d{2,5})/);
+                  if (m) {
+                    const w = Math.min(6000, +m[1]);
+                    const h = Math.min(6000, +m[2]);
+                    if (!sizes.some((sz) => sz.w === w && sz.h === h)) sizes.push({ id: 'custom', label: `${w}×${h}`, w, h });
+                  }
+                  setIsExporting(true);
+                  try {
+                    const r = await exportPositions(localProducts, {
+                      preset: exportPreset,
+                      photos: exportPhotos,
+                      baseUrl: exportBaseUrl,
+                      projectName,
+                      sizes,
+                      keepOriginal: exportKeepOriginal,
+                      fit: exportFit,
+                      bg: exportBg,
+                    });
+                    setBatchNote(r.missing.length ? `Скачан ZIP. Без фото: ${r.missing.slice(0, 6).join(', ')}${r.missing.length > 6 ? '…' : ''}` : 'Скачан ZIP с позициями и фото.');
+                    setShowExport(false);
+                  } finally {
+                    setIsExporting(false);
+                  }
                 }}
                 className="ofst-cell ofst-cell--primary"
               >
-                Скачать ZIP
+                {isExporting ? 'Собираю…' : 'Скачать ZIP'}
               </button>
             </div>
           </div>

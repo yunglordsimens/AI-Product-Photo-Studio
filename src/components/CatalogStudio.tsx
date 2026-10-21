@@ -13,6 +13,7 @@ import {
   CatalogVersion,
   DEFAULT_RECIPES,
   describeRecipeFromRefs,
+  editCatalogShot,
   emptyCatalogState,
   fileBaseName,
   generateCatalogShot,
@@ -26,6 +27,8 @@ import { buildZip, dataUrlToBytes, downloadBlob } from '../utils/zip';
 import { groupPrompts } from '../utils/promptCategories';
 import { fileSafe } from '../utils/positionsExport';
 import { isImageFile, normalizeImageFiles } from '../utils/heic';
+import { SOURCE_FIX_MARKER } from '../utils/storage';
+import { renderBeforeAfter } from '../utils/beforeAfter';
 
 interface CatalogStudioProps {
   isOpen: boolean;
@@ -92,6 +95,9 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   const [afterIdx, setAfterIdx] = useState(0);
   const wheelAcc = useRef(0);
   const [beforeIdx, setBeforeIdx] = useState(0);
+  const [editText, setEditText] = useState('');
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [isMakingCards, setIsMakingCards] = useState(false);
   const setCompareId = (id: string | null) => {
     setCompareIdState(id);
     setAfterIdx(0);
@@ -515,11 +521,79 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
     setBeforeIdx(0);
   };
 
+  /** Quick fixes = the «Исходник» master prompts, named without the shelf prefix */
+  const quickEdits = useMemo(
+    () => masterPrompts.filter((mp) => mp.prompt.includes(SOURCE_FIX_MARKER)).map((mp) => ({ ...mp, short: mp.name.replace(/^Исходник:\s*/i, '') })),
+    [masterPrompts]
+  );
+
+  /** Edit the take being shown by words; the result goes on top of the «после» stack */
+  const editTake = async (itemId: string, idx: number, instruction: string) => {
+    const text = instruction.trim();
+    const it = catalog.items.find((i) => i.id === itemId);
+    const src = it ? afterStack(it)[idx] : undefined;
+    if (!it || !src || !text || !activeVersion || editingItemId) return;
+    if (!hasGenerationAccess()) return onOpenSettings();
+    setEditingItemId(itemId);
+    setNotice(null);
+    try {
+      const out = await withRetry(() => editCatalogShot(src, text, activeVersion));
+      // the edited take goes on top; the one it came from stays in the stack
+      pushTake(itemId, activeVersion.id, out);
+      setAfterIdx(0);
+      setEditText('');
+    } catch (err) {
+      setNotice({ kind: 'error', text: `Правка не вышла: ${err instanceof Error ? err.message : String(err)}` });
+    } finally {
+      setEditingItemId(null);
+    }
+  };
+
+  /** A «до | после» picture for one item, to show a client or post */
+  const downloadBeforeAfter = async (it: CatalogItem, beforeSrc: string, afterSrc: string) => {
+    try {
+      const blob = await renderBeforeAfter(beforeSrc, afterSrc, { title: it.name });
+      downloadBlob(blob, `${fileSafe(it.name)} до-после.jpg`);
+    } catch (err) {
+      setNotice({ kind: 'error', text: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  /** «До | после» for every ★ item (or every ready one if nothing is starred), one ZIP */
+  const exportBeforeAfterZip = async () => {
+    if (!activeVersion) return;
+    const done = catalog.items.filter((it) => it.results[activeVersion.id]?.status === 'done' && it.results[activeVersion.id]?.src);
+    const picked = done.some((it) => it.results[activeVersion.id]!.approved) ? done.filter((it) => it.results[activeVersion.id]!.approved) : done;
+    if (picked.length === 0) {
+      setNotice({ kind: 'info', text: 'В этой версии ещё нет готовых фото.' });
+      return;
+    }
+    setIsMakingCards(true);
+    try {
+      const used = new Map<string, number>();
+      const entries: { name: string; data: Uint8Array }[] = [];
+      for (const it of picked) {
+        const blob = await renderBeforeAfter(it.original, it.results[activeVersion.id]!.src!, { title: it.name });
+        const base = fileSafe(it.name);
+        const n = (used.get(base.toLowerCase()) || 0) + 1;
+        used.set(base.toLowerCase(), n);
+        entries.push({ name: `${n > 1 ? `${base} ${n}` : base} до-после.jpg`, data: new Uint8Array(await blob.arrayBuffer()) });
+      }
+      downloadBlob(buildZip(entries), `${slugify(projectName)}-before-after-${activeVersion.label}.zip`);
+    } catch (err) {
+      setNotice({ kind: 'error', text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setIsMakingCards(false);
+    }
+  };
+
   // Keyboard in compare view
   const compareIndex = compareId ? catalog.items.findIndex((i) => i.id === compareId) : -1;
   useEffect(() => {
     if (!compareId) return;
     const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
       if (e.key === 'Escape') setCompareId(null);
       if (e.key === 'ArrowRight' && compareIndex < catalog.items.length - 1) setCompareId(catalog.items[compareIndex + 1].id);
       if (e.key === 'ArrowLeft' && compareIndex > 0) setCompareId(catalog.items[compareIndex - 1].id);
@@ -868,6 +942,14 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
               >
                 ZIP {stats.approved > 0 ? `(${stats.approved})` : ''}
               </button>
+              <button
+                onClick={exportBeforeAfterZip}
+                disabled={!activeVersion || stats.done === 0 || isMakingCards}
+                className="ofst-cell"
+                title="Картинки «до | после» для ★ (или для всех готовых), одним ZIP"
+              >
+                {isMakingCards ? 'собираю…' : `до/после ${stats.approved > 0 ? `(${stats.approved})` : ''}`}
+              </button>
             </div>
           </div>
 
@@ -1033,8 +1115,10 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                     {after.length > 1 && stepper(aIdx, after.length, setAfterIdx, 'дубль')}
                   </span>
                 </div>
-                {isRunningNow && aIdx === 0 ? (
-                  <div className="flex-1 flex items-center justify-center bg-[var(--soft)] text-[var(--grey)] text-[13px]">генерация…</div>
+                {(isRunningNow && aIdx === 0) || editingItemId === compareItem.id ? (
+                  <div className="flex-1 flex items-center justify-center bg-[var(--soft)] text-[var(--grey)] text-[13px]">
+                    {editingItemId === compareItem.id ? 'правлю…' : 'генерация…'}
+                  </div>
                 ) : shownAfter ? (
                   <BigImage src={shownAfter} label="" />
                 ) : (
@@ -1044,10 +1128,52 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                 )}
               </div>
             </div>
+            {/* Edit the shown take by words; quick fixes are the «Исходник» master prompts */}
+            {shownAfter && (
+              <form
+                className="shrink-0 flex flex-wrap items-center gap-0.5"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  editTake(compareItem.id, aIdx, editText);
+                }}
+              >
+                <input
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  placeholder="править словами: «фон темнее», «убери крошки», «тень мягче»… Enter"
+                  className="flex-1 min-w-[200px] h-7 px-1 bg-[var(--soft)] text-[13px] select-text"
+                  disabled={!!editingItemId}
+                />
+                <button type="submit" disabled={!editText.trim() || !!editingItemId} className="ofst-cell ofst-cell--primary !h-7">
+                  править
+                </button>
+                {quickEdits.slice(0, 8).map((q) => (
+                  <button
+                    key={q.id}
+                    type="button"
+                    onClick={() => editTake(compareItem.id, aIdx, q.prompt)}
+                    disabled={!!editingItemId}
+                    className="ofst-cell ofst-cell--muted !h-7"
+                    title={q.prompt.replace(SOURCE_FIX_MARKER, '').trim()}
+                  >
+                    {q.short}
+                  </button>
+                ))}
+              </form>
+            )}
             <div className="shrink-0 flex justify-between">
               <button onClick={() => compareIndex > 0 && setCompareId(catalog.items[compareIndex - 1].id)} disabled={compareIndex <= 0} className="ofst-cell">
                 ← назад
               </button>
+              {shownAfter && (
+                <button
+                  onClick={() => downloadBeforeAfter(compareItem, before[bIdx], shownAfter)}
+                  className="ofst-cell"
+                  title="Скачать одну картинку: слева «до», справа «после», внизу название"
+                >
+                  скачать «до | после»
+                </button>
+              )}
               <button
                 onClick={() => compareIndex < catalog.items.length - 1 && setCompareId(catalog.items[compareIndex + 1].id)}
                 disabled={compareIndex >= catalog.items.length - 1}

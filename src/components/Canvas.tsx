@@ -27,6 +27,9 @@ interface CanvasProps {
   /** Board photos dropped on a position row (slot -1 = original, 0.. = variant column, undefined = first free) */
   onDropCardsOnPosition?: (cardIds: string[], positionId: string, slot?: number) => void;
   onChangeCardTakes?: (cardId: string, takes: string[]) => void;
+  onEditCard?: (cardId: string, instruction: string, promptName?: string) => void;
+  quickEditPrompts?: { id: string; name: string; prompt: string }[];
+  isGenerating?: boolean;
   onDeleteSelection?: (cardIds: string[], noteIds: string[]) => void;
   onImportFolder?: (kind: 'products' | 'board' | 'ask') => void;
   onAddNote: (note: Note) => void;
@@ -70,6 +73,9 @@ export const Canvas: React.FC<CanvasProps> = ({
   onDropProducts,
   onDropCardsOnPosition,
   onChangeCardTakes,
+  onEditCard,
+  quickEditPrompts,
+  isGenerating,
   onDeleteSelection,
   onImportFolder,
   onAddNote,
@@ -1662,6 +1668,9 @@ export const Canvas: React.FC<CanvasProps> = ({
             onPreview={onPreviewCard}
             onChangeTakes={onChangeCardTakes}
             editTakes={selectedCardIds.size === 1 && selectedCardIds.has(card.id)}
+            onEdit={onEditCard}
+            quickEdits={quickEditPrompts}
+            isGenerating={isGenerating}
           />
         ))}
 

@@ -1441,7 +1441,14 @@ export default function App() {
   // Handle Gemini Image Generation
   const handleTriggerGeminiGeneration = async (
     prompt: string,
-    options?: { isProductReplacement?: boolean; selectedProduct?: ProductItem; masterPromptName?: string; photoRole?: 'product' | 'style' }
+    options?: {
+      isProductReplacement?: boolean;
+      selectedProduct?: ProductItem;
+      masterPromptName?: string;
+      photoRole?: 'product' | 'style';
+      /** Generate from these photos instead of the board selection (e.g. «править» on one photo) */
+      sourceCards?: Card[];
+    }
   ) => {
     const apiKey = getStoredApiKey();
     if (!hasGenerationAccess()) {
@@ -1451,8 +1458,8 @@ export default function App() {
     }
 
     const currentCards = activeProject.cards || [];
-    const selectedCards = currentCards.filter((c) => selectedCardIds.has(c.id));
-    const noteTexts = consideredNotes.map((n) => n.text);
+    const selectedCards = options?.sourceCards || currentCards.filter((c) => selectedCardIds.has(c.id));
+    const noteTexts = options?.sourceCards ? [] : consideredNotes.map((n) => n.text);
 
     setIsGenerating(true);
     setGenerationError(null);
@@ -1471,7 +1478,7 @@ export default function App() {
       );
 
       // Compress data URL before storing
-      const compressedDataUrl = await compressDataUrl(result.imageUrl, 800, 800, 0.85);
+      const compressedDataUrl = await compressDataUrl(result.imageUrl, 1600, 1600, 0.9);
 
       // Compute position for new card (+50px to the right and down relative to references)
       let newX = 200;
@@ -1589,7 +1596,7 @@ export default function App() {
         );
 
         // Compress image data URL for localStorage safety
-        const compressedDataUrl = await compressDataUrl(result.imageUrl, 800, 800, 0.82);
+        const compressedDataUrl = await compressDataUrl(result.imageUrl, 1600, 1600, 0.9);
 
         // Find if product has matching card on canvas (by ID or matching name)
         const matchingCard = runningCards.find(
@@ -2009,6 +2016,20 @@ export default function App() {
     [activeProject.cards, handleUpdateCards]
   );
 
+  // «править» on one photo: edit it by words (or by a «Исходник» prompt); the result appears next to it
+  const handleEditCard = useCallback(
+    (cardId: string, instruction: string, promptName?: string) => {
+      const card = (activeProject.cards || []).find((c) => c.id === cardId);
+      const text = instruction.trim();
+      if (!card || !text) return;
+      const prompt = text.includes(SOURCE_FIX_MARKER) ? text : `${SOURCE_FIX_MARKER} ${text}`;
+      handleTriggerGeminiGeneration(prompt, { sourceCards: [card], masterPromptName: promptName });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeProject.cards, projects, activeProjectId]
+  );
+  const quickEditPrompts = useMemo(() => masterPrompts.filter((mp) => mp.prompt.includes(SOURCE_FIX_MARKER)), [masterPrompts]);
+
   // The selection is exactly one existing group → the top-bar cell ungroups it
   const selectedGroup = useMemo(() => {
     if (selectedCardIds.size === 0) return undefined;
@@ -2360,6 +2381,9 @@ export default function App() {
           onDeleteSelection={handleDeleteSelection}
           onDropProducts={handleDropProducts}
           onChangeCardTakes={handleChangeCardTakes}
+          onEditCard={handleEditCard}
+          quickEditPrompts={quickEditPrompts}
+          isGenerating={isGenerating}
           onDropCardsOnPosition={isProductLibraryOpen ? handleDropCardsOnPosition : undefined}
           onImportFolder={(kind) => pickFolder(kind)}
           selectedCardIds={selectedCardIds}

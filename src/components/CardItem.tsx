@@ -19,6 +19,10 @@ interface CardItemProps {
   onChangeTakes?: (cardId: string, takes: string[]) => void;
   /** Show all role chips to pick from (only when this is the one selected photo) */
   editTakes?: boolean;
+  /** «править»: change this photo by words or by a ready «Исходник» prompt */
+  onEdit?: (cardId: string, instruction: string, promptName?: string) => void;
+  quickEdits?: { id: string; name: string; prompt: string }[];
+  isGenerating?: boolean;
 }
 
 const stop = {
@@ -44,8 +48,13 @@ export const CardItem: React.FC<CardItemProps> = memo(
     onPreview,
     onChangeTakes,
     editTakes = false,
+    onEdit,
+    quickEdits = [],
+    isGenerating = false,
   }) => {
     const [showInfo, setShowInfo] = useState(false);
+    const [editing, setEditing] = useState(false);
+    const [editText, setEditText] = useState('');
     const meta = card.meta;
     const kindLabel = meta
       ? { generate: 'Генерация', product: 'Продукт в сцене', fix: 'Исправление исходника', batch: 'Пакет' }[meta.kind]
@@ -87,6 +96,18 @@ export const CardItem: React.FC<CardItemProps> = memo(
             }`}
             {...stop}
           >
+            {onEdit && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditing((v) => !v);
+                }}
+                className={`px-1.5 h-5 ${editing ? 'bg-[var(--fg)] text-white' : 'hover:bg-[var(--soft)]'}`}
+                title="Поправить это фото словами или готовым действием"
+              >
+                править
+              </button>
+            )}
             <button onClick={(e) => { e.stopPropagation(); onPreview(card); }} className="px-1.5 h-5 hover:bg-[var(--soft)]" title="Просмотр">
               смотреть
             </button>
@@ -128,6 +149,49 @@ export const CardItem: React.FC<CardItemProps> = memo(
             <div className="text-[var(--grey)]">
               {meta.model}, источников: {meta.sourceIds?.length || 0}
             </div>
+          </div>
+        )}
+
+        {/* «править»: a line to type into, plus ready actions from the «Исходник» shelf */}
+        {editing && onEdit && (
+          <div className="absolute left-0 top-full mt-1 z-40 w-[max(100%,260px)] bg-white p-1 text-[12px] ofst-pop" {...stop}>
+            <input
+              autoFocus
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter' && editText.trim()) {
+                  onEdit(card.id, editText);
+                  setEditText('');
+                  setEditing(false);
+                }
+                if (e.key === 'Escape') setEditing(false);
+              }}
+              placeholder="что поправить: фон темнее, убери ложку…  Enter"
+              className="w-full h-7 px-1.5 text-[12px] select-text"
+              disabled={isGenerating}
+            />
+            {quickEdits.length > 0 && (
+              <div className="flex flex-wrap pt-1">
+                {quickEdits.map((q) => (
+                  <button
+                    key={q.id}
+                    disabled={isGenerating}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit(card.id, q.prompt, q.name);
+                      setEditing(false);
+                    }}
+                    className="px-1 h-5 text-[var(--grey)] hover:text-[var(--fg)] hover:bg-[var(--soft)] disabled:opacity-40"
+                    title={q.prompt}
+                  >
+                    {q.name.replace(/^Исходник:\s*/, '')}
+                  </button>
+                ))}
+              </div>
+            )}
+            {isGenerating && <p className="pt-1 text-[var(--grey)]">генерация…</p>}
           </div>
         )}
 
