@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { BoardMatrix, Card } from '../types';
+import { Info } from './Info';
 import { MATRIX_LABEL_H, MATRIX_LABEL_W, matrixHeight, matrixWidth, membersOf } from '../utils/matrix';
 
 export interface MatrixApi {
@@ -128,6 +129,10 @@ export const BoardMatrixView: React.FC<{ matrix: BoardMatrix; cards: Card[]; zoo
         <span onMouseDown={startDrag} className="px-1 h-5 inline-flex items-center bg-[var(--fg)] text-white cursor-grab active:cursor-grabbing" title="Перетащить сетку вместе с фото">
           ⠿ Оси
         </span>
+        <Info>
+          Оси — сетка, чтобы разобрать фото: одна линия — один товар, поперёк — его ракурсы или варианты. Перетащи фото в клетку, оно встанет
+          ровно. Подписи меняются кликом, ⇄ меняет строки и столбцы местами, «→ в позиции» сделает из каждого товара позицию.
+        </Info>
         <span className="text-[var(--grey)]">
           товары — {productsRows ? 'строки' : 'столбцы'}, ракурсы — {productsRows ? 'столбцы' : 'строки'} · фото {filled}
         </span>

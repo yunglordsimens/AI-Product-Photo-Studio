@@ -65,6 +65,36 @@ interface TopBarProps {
   onUngroupSelected?: () => void;
   view?: StudioView;
   onChangeView?: (view: StudioView) => void;
+  /** The logo folds every side panel and window (the projects column stays) */
+  onLogoClick?: () => void;
+}
+
+const APP_VERSION = 'v1.16 · 22.10';
+const LANGS = [
+  { id: 'ru', label: 'RU', name: 'Русский' },
+  { id: 'en', label: 'EN', name: 'English' },
+  { id: 'cs', label: 'CS', name: 'Čeština' },
+  { id: 'vi', label: 'VI', name: 'Tiếng Việt' },
+];
+
+/** A small popover that closes on any click outside it */
+function usePopover() {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('keydown', esc);
+    return () => {
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('keydown', esc);
+    };
+  }, [open]);
+  return { open, setOpen, ref };
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -80,6 +110,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onUngroupSelected,
   view = 'board',
   onChangeView,
+  onLogoClick,
   onAddImage,
   onAddFolder,
   onClearAll,
@@ -132,6 +163,23 @@ export const TopBar: React.FC<TopBarProps> = ({
   }, [addMenuOpen]);
 
   const cell = (on = false) => `ofst-cell ${on ? 'is-on' : ''}`;
+  const copyMenu = usePopover();
+  const langMenu = usePopover();
+  const [lang, setLang] = React.useState<string>(() => {
+    try {
+      return localStorage.getItem('aips_lang') || 'ru';
+    } catch {
+      return 'ru';
+    }
+  });
+  const pickLang = (id: string) => {
+    setLang(id);
+    try {
+      localStorage.setItem('aips_lang', id);
+    } catch {
+      /* private mode */
+    }
+  };
 
   const toolbarItems: { id: string; desktopOnly: boolean; node: React.ReactNode }[] = [
     { id: 'photo', desktopOnly: false, node: (
@@ -266,7 +314,14 @@ export const TopBar: React.FC<TopBarProps> = ({
             Проекты
           </button>
         )}
-        <span className="hidden sm:inline font-semibold tracking-[.02em] shrink-0">OFST Photo</span>
+        <button
+          onClick={onLogoClick}
+          className="hidden sm:flex flex-col items-start justify-center shrink-0 h-full -ml-2 px-2 text-left hover:bg-[var(--soft)] cursor-pointer"
+          title="Свернуть все панели и окна (проекты останутся)"
+        >
+          <span className="font-semibold tracking-[.02em] leading-4">OFST Photo</span>
+          <span className="text-[10px] leading-3 text-[var(--grey)] tabular-nums">{APP_VERSION}</span>
+        </button>
         {/* Tabs: the board, the catalog conveyor, video (to come) */}
         {onChangeView && (
           <nav className="flex shrink-0 self-stretch" aria-label="Режим" role="tablist">
@@ -288,7 +343,6 @@ export const TopBar: React.FC<TopBarProps> = ({
           {projectName} · {cardCount} фото
           {selectedCount > 0 && <span className="ml-1 text-[var(--fg)]">· выбрано {selectedCount}</span>}
         </span>
-        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.15 · 22.10</span>
       </div>
 
       {/* Tools: text cells, reorderable by drag */}
@@ -334,12 +388,86 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button id="btn-topbar-settings" onClick={onOpenSettings} className="ofst-cell ofst-cell--muted" title="Настройки Gemini API">
             Настройки
           </button>
-          <button id="btn-top-export-json" onClick={onExportProject} className="ofst-cell ofst-cell--muted" title="Скачать проект файлом JSON">
-            Скачать
+          {/* Copy of the project: asks first, says what the file is */}
+          <div ref={copyMenu.ref} className="relative">
+            <button
+              id="btn-top-project-copy"
+              onClick={() => copyMenu.setOpen((v) => !v)}
+              className={`ofst-cell ${copyMenu.open ? 'is-on' : 'ofst-cell--muted'}`}
+              title="Скачать копию проекта или открыть копию из файла"
+            >
+              Копия
+            </button>
+            {copyMenu.open && (
+              <div className="ofst-window absolute right-0 top-full mt-1 z-50 w-[300px] bg-white p-2 text-[13px] ofst-pop">
+                <div className="ofst-run">
+                  <span>Копия проекта «{projectName}»</span>
+                </div>
+                <p className="text-[12px] text-[var(--grey)] leading-snug pt-1">
+                  Один файл .json: фото доски, заметки, группы, оси, позиции и мастер-промпты. Нужна, чтобы перенести проект в другой
+                  браузер или сохранить на всякий случай. Каталог (прогоны) в неё не входит.
+                </p>
+                <div className="flex flex-col pt-1">
+                  <button
+                    id="btn-top-export-json"
+                    className="ofst-cell ofst-cell--primary justify-between"
+                    onClick={() => {
+                      copyMenu.setOpen(false);
+                      onExportProject();
+                    }}
+                  >
+                    <span>Скачать копию</span>
+                    <span className="opacity-60">.json</span>
+                  </button>
+                  <button
+                    id="btn-top-import-json"
+                    className="ofst-cell justify-between"
+                    onClick={() => {
+                      copyMenu.setOpen(false);
+                      onImportProject();
+                    }}
+                  >
+                    <span>Открыть копию из файла</span>
+                    <span className="text-[var(--grey)]">новым проектом</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        {/* Language of the studio: the choice is kept; translations come later */}
+        <div ref={langMenu.ref} className="relative">
+          <button
+            onClick={() => langMenu.setOpen((v) => !v)}
+            className={`ofst-cell ${langMenu.open ? 'is-on' : 'ofst-cell--muted'}`}
+            title="Язык студии"
+            aria-label="Язык студии"
+          >
+            {LANGS.find((l) => l.id === lang)?.label || 'RU'}
           </button>
-          <button id="btn-top-import-json" onClick={onImportProject} className="ofst-cell ofst-cell--muted" title="Открыть проект из файла JSON">
-            Открыть
-          </button>
+          {langMenu.open && (
+            <div className="ofst-window absolute right-0 top-full mt-1 z-50 w-[200px] bg-white p-2 text-[13px] ofst-pop">
+              <div className="ofst-run">
+                <span>Язык</span>
+              </div>
+              <div className="flex flex-col pt-1">
+                {LANGS.map((l) => (
+                  <button
+                    key={l.id}
+                    className={`ofst-cell justify-between ${lang === l.id ? 'is-on' : ''}`}
+                    onClick={() => {
+                      pickLang(l.id);
+                      langMenu.setOpen(false);
+                    }}
+                  >
+                    <span>{l.name}</span>
+                    <span className="opacity-60">{l.label}</span>
+                  </button>
+                ))}
+              </div>
+              {lang !== 'ru' && <p className="text-[11px] text-[var(--grey)] leading-snug pt-1">Перевод готовится: пока весь текст по-русски.</p>}
+            </div>
+          )}
         </div>
         {onOpenRightDrawer && (
           <button id="btn-open-right-actions-drawer" onClick={onOpenRightDrawer} className={`ofst-cell ${isMenuOpen ? 'is-on' : 'ofst-cell--muted'}`} title="Все инструменты и настройки" aria-label="Меню инструментов">

@@ -34,8 +34,8 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({ card, onCl
             <button onClick={handleDownloadImage} className="hover:text-[var(--fg)] cursor-pointer">
               сохранить фото
             </button>
-            <button onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer">
-              закрыть
+            <button onClick={onClose} className="ofst-x" aria-label="Закрыть">
+              ×
             </button>
           </span>
         </div>

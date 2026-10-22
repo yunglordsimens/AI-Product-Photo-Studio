@@ -69,8 +69,8 @@ export const StyleAnalysisModal: React.FC<StyleAnalysisModalProps> = ({
         <div className="ofst-run shrink-0">
           <span>Анализ стиля</span>
           <span>свет, фон, цвет, ракурс</span>
-          <button onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer">
-            закрыть
+          <button onClick={onClose} className="ofst-x" aria-label="Закрыть">
+            ×
           </button>
         </div>
 

@@ -5,6 +5,7 @@ import { ImageCropModal } from './ImageCropModal';
 import { normalizeImageFiles, isImageFile } from '../utils/heic';
 import { PRODUCT_DRAG_TYPE } from '../utils/dragTypes';
 import { folderFilesFromInput, snapshotFolderFiles } from '../utils/folderImport';
+import { Info } from './Info';
 import { ensureVariantCols, folderImportNote, importFolderToPositions } from '../utils/positionsImport';
 import { EXPORT_PRESETS, EXPORT_SIZES, ExportPhotos, ExportPreset, ExportSize, FitMode, exportPositions } from '../utils/positionsExport';
 import { NO_GROUP, SLOT_DRAG_TYPE, SlotRef, groupByCategory, mergeInto, movePhoto, renameCategory, setCategory, slotSet } from '../utils/positions';
@@ -601,10 +602,16 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
       >
         <div className="px-2 pt-2">
           <div className="ofst-run">
-            <span>Позиции проекта</span>
+            <span className="flex items-center gap-1.5">
+              Позиции проекта
+              <Info>
+                Строка — один товар. Первая клетка — исходник, дальше — варианты и ракурсы (их число меняют «Варианты − +»). ★ на фото — какое
+                пойдёт в экспорт как финальное. Группы — по папкам или ⌘G. Фото с доски можно перетащить прямо в клетку; строки — на доску.
+              </Info>
+            </span>
             <span className="tabular-nums">{localProducts.length}</span>
-            <button onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer">
-              закрыть
+            <button onClick={onClose} className="ofst-x" aria-label="Закрыть">
+              ×
             </button>
           </div>
         </div>
@@ -856,7 +863,7 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
             </datalist>
           </div>
         )}
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto pl-1.5 pr-0.5">
           {localProducts.length === 0 ? (
             <div className="px-2 pt-4">
               <p className="text-[clamp(20px,1.8vw,26px)] font-medium leading-tight">Позиций пока нет</p>
@@ -924,21 +931,24 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                       className={`align-top ${selectedIds.has(prod.id) ? 'bg-[var(--marker)]/25' : ''}`}
                       title="Перетащи на доску (выделенные — все вместе)"
                     >
-                      <td className="w-6 pt-0.5 text-[11px] text-[var(--grey)] tabular-nums">
-                        {String(idx + 1).padStart(2, '0')}
-
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(prod.id)}
-                          onChange={() =>
-                            setSelectedIds((prev) => {
-                              const n = new Set(prev);
-                              if (n.has(prod.id)) n.delete(prod.id);
-                              else n.add(prod.id);
-                              return n;
-                            })
-                          }
-                        />
+                      <td className="w-6 pt-1 text-[11px] text-[var(--grey)] tabular-nums">
+                        {/* checkbox first, in one column with the «выбрать все» and group checkboxes above */}
+                        <div className="flex flex-col items-start gap-1">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(prod.id)}
+                            aria-label={`Выбрать ${prod.name}`}
+                            onChange={() =>
+                              setSelectedIds((prev) => {
+                                const n = new Set(prev);
+                                if (n.has(prod.id)) n.delete(prod.id);
+                                else n.add(prod.id);
+                                return n;
+                              })
+                            }
+                          />
+                          <span>{String(idx + 1).padStart(2, '0')}</span>
+                        </div>
                       </td>
                       <td
                         className={`w-[104px] ${dropKey === `${prod.id}:-1` ? 'ofst-drop-target' : ''}`}

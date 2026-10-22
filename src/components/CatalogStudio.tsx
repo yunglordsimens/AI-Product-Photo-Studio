@@ -29,6 +29,7 @@ import { fileSafe } from '../utils/positionsExport';
 import { isImageFile, normalizeImageFiles } from '../utils/heic';
 import { SOURCE_FIX_MARKER } from '../utils/storage';
 import { renderBeforeAfter } from '../utils/beforeAfter';
+import { Info } from './Info';
 
 interface CatalogStudioProps {
   isOpen: boolean;
@@ -1086,8 +1087,8 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                 {compareIndex + 1}/{catalog.items.length} · {compareItem.name}
               </span>
               <span>← → позиции · колесо или ↑ ↓ над половиной — листать · A выбрать</span>
-              <button onClick={() => setCompareId(null)} className="hover:text-[var(--fg)]" aria-label="Закрыть">
-                закрыть
+              <button onClick={() => setCompareId(null)} className="ofst-x" aria-label="Закрыть">
+                ×
               </button>
             </div>
             <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 gap-0.5 overflow-auto md:overflow-hidden">
@@ -1285,11 +1286,18 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
 };
 
 /** Step head: number and title stand on the rule, hint on the right */
+const STEP_HELP: Record<number, string> = {
+  1: '01 — первый шаг. Эталон: 1–3 кадра, как должны выглядеть все фото каталога (фон, свет, ракурс). Рецепт ниже описывает его словами; «Описать по эталону» напишет его сам.',
+  2: '02 — второй шаг. Фото товаров, которые надо переснять в этом стиле: с доски, из позиций или с компьютера. Название берётся из имени файла или позиции.',
+  3: '03 — третий шаг. Прогон: сначала тест на одном товаре, потом все. Каждый новый набор настроек сохраняется версией (v1, v2…), старые не пропадают.',
+};
+
 function StepTitle({ n, title, hint }: { n: number; title: string; hint: string }) {
   return (
     <div className="ofst-run">
-      <span>
+      <span className="flex items-center gap-1.5">
         {String(n).padStart(2, '0')} {title}
+        {STEP_HELP[n] && <Info>{STEP_HELP[n]}</Info>}
       </span>
       <span>{hint}</span>
     </div>

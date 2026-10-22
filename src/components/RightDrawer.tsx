@@ -71,8 +71,8 @@ export const RightDrawer: React.FC<RightDrawerProps> = ({
       <div id="right-actions-drawer" className="ofst-panel h-full flex flex-col p-2">
         <div className="ofst-run shrink-0 mb-2">
           <span>Меню</span>
-          <button onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer">
-            закрыть
+          <button onClick={onClose} className="ofst-x" aria-label="Закрыть">
+            ×
           </button>
         </div>
         <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">

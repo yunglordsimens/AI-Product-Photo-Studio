@@ -575,8 +575,8 @@ export async function optimizeAllProjectsMemory(): Promise<{
  * Saves the project as JSON. Master prompts live outside projects (one library per
  * browser), so they are written into the file too; import merges them back.
  */
-export function exportProjectToJson(project: Project, masterPrompts: MasterPrompt[] = []): void {
-  const payload = { ...project, masterPrompts, exportedAt: Date.now(), format: 'aips-project-v2' };
+export function exportProjectToJson(project: Project, masterPrompts: MasterPrompt[] = [], positions: ProductItem[] = []): void {
+  const payload = { ...project, masterPrompts, positions, exportedAt: Date.now(), format: 'aips-project-v2' };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const downloadAnchor = document.createElement('a');

@@ -1,3 +1,4 @@
+import { Info } from './Info';
 import React, { useState } from 'react';
 import { Project, StorageInfo } from '../types';
 
@@ -92,12 +93,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex flex-col h-full w-[240px] md:w-[var(--sb-w)]">
         <div className="px-2 pt-2">
           <div className="ofst-run">
-            <span>Проекты</span>
-            <span className="flex gap-3">
-              <span>{projects.length}</span>
+            <span className="flex items-center gap-1.5">
+              Проекты
+              <Info>
+                Каждый проект — своя доска, свои позиции и свой каталог. Справа у проекта — сколько фото на его доске. Двойной клик по
+                названию — переименовать.
+              </Info>
+            </span>
+            <span className="flex items-center gap-2">
+              <span title={`Проектов: ${projects.length}`}>{projects.length}</span>
               {onCollapse && (
-                <button onClick={onCollapse} className="hidden md:inline hover:text-[var(--fg)] cursor-pointer" title="Скрыть колонку проектов">
-                  скрыть
+                <button onClick={onCollapse} className="ofst-x hidden md:inline-flex" title="Скрыть колонку проектов" aria-label="Скрыть колонку проектов">
+                  ×
                 </button>
               )}
             </span>
@@ -120,7 +127,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       if (e.key === 'Escape') cancelRename();
                     }}
                     autoFocus
-                    className="w-full h-7 px-1.5 text-[13px] focus:outline-none"
+                    className="w-full h-7 px-2 text-[13px] focus:outline-none"
                   />
                 </li>
               );
@@ -131,7 +138,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 id={`project-item-${proj.id}`}
                 onClick={() => handleSelect(proj.id)}
                 onDoubleClick={(e) => startRename(proj, e)}
-                className={`group flex items-center gap-2 h-7 px-1.5 -mx-1.5 text-[13px] cursor-pointer ${
+                className={`group flex items-center gap-2 h-7 px-2 text-[13px] cursor-pointer ${
                   isActive ? 'bg-[var(--fg)] text-white' : 'hover:bg-[var(--soft)]'
                 }`}
                 title="Двойной клик — переименовать"
@@ -154,7 +161,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 >
                   удалить
                 </button>
-                <span className={`text-[11px] tabular-nums ${isActive ? 'text-white/70' : 'text-[var(--grey)]'}`}>
+                <span
+                  className={`min-w-[22px] h-4 px-1 inline-flex items-center justify-center text-[11px] tabular-nums ${
+                    isActive ? 'bg-white/15 text-white' : 'bg-[var(--soft)] text-[var(--grey)]'
+                  }`}
+                  title={`${proj.cards?.length || 0} фото на доске`}
+                >
                   {proj.cards?.length || 0}
                 </span>
               </li>
@@ -164,7 +176,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               id="btn-sidebar-new-project"
               onClick={onCreateProject}
-              className="ofst-cell justify-start w-[calc(100%+12px)] -mx-1.5 px-1.5 text-[var(--grey)] hover:text-[var(--fg)]"
+              className="ofst-cell justify-start w-full px-2 text-[var(--grey)] hover:text-[var(--fg)]"
               title="Создать новый проект"
             >
               + Новый проект

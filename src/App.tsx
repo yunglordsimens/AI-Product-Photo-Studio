@@ -60,6 +60,7 @@ import { ImageCropModal, CropAspectRatio, cropRatioValue } from './components/Im
 import { RightDrawer } from './components/RightDrawer';
 import { DockSlot } from './components/DockSlot';
 import { CatalogStudio } from './components/CatalogStudio';
+import { Info } from './components/Info';
 
 interface CanvasCropQueueItem {
   id: string;
@@ -311,14 +312,32 @@ export default function App() {
   }, []);
 
   // Toggle Connection Mode
+  // Links mode needs the board: turning it on folds the AI and positions panels
   const handleToggleConnectionMode = useCallback(() => {
     setIsConnectionMode((prev) => {
       if (prev) {
         setConnectingSourceCardId(null);
         setSelectedConnectionId(null);
+      } else {
+        setIsGenerationOpen(false);
+        setIsProductLibraryOpen(false);
       }
       return !prev;
     });
+  }, []);
+
+  /** The logo: fold every side panel and window; the projects column stays as it is */
+  const handleLogoClick = useCallback(() => {
+    setIsGenerationOpen(false);
+    setIsProductLibraryOpen(false);
+    setIsRightDrawerOpen(false);
+    setIsMasterPromptsOpen(false);
+    setIsStyleAnalysisOpen(false);
+    setIsSettingsOpen(false);
+    setIsExportModalOpen(false);
+    setIsShortcutsOpen(false);
+    setIsConnectionMode(false);
+    setConnectingSourceCardId(null);
   }, []);
 
   // Sync to IndexedDB Storage
@@ -1705,8 +1724,8 @@ export default function App() {
 
   // Export JSON
   const handleExportProject = useCallback(() => {
-    exportProjectToJson(activeProject, masterPrompts);
-  }, [activeProject, masterPrompts]);
+    exportProjectToJson(activeProject, masterPrompts, productsList);
+  }, [activeProject, masterPrompts, productsList]);
 
   // Import JSON
   const handleImportProjectClick = () => {
@@ -1717,8 +1736,8 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const parsed = (await parseProjectJson(file)) as Project & { masterPrompts?: unknown; exportedAt?: number; format?: string };
-      const { masterPrompts: importedPrompts, exportedAt: _e, format: _f, ...projectOnly } = parsed;
+      const parsed = (await parseProjectJson(file)) as Project & { masterPrompts?: unknown; positions?: unknown; exportedAt?: number; format?: string };
+      const { masterPrompts: importedPrompts, positions: importedPositions, exportedAt: _e, format: _f, ...projectOnly } = parsed;
       const imported: Project = { ...projectOnly };
       // Importing the same file twice must not create two projects with one id
       if (projects.some((p) => p.id === imported.id)) {
@@ -1726,6 +1745,9 @@ export default function App() {
         imported.name = `${imported.name} (импорт)`;
       }
       const updated = [...projects, imported];
+      if (Array.isArray(importedPositions) && importedPositions.length > 0) {
+        await saveProjectProducts(imported.id, importedPositions as ProductItem[]);
+      }
       saveProjectsToStorage(updated);
       handleSelectProject(imported.id);
       const { merged, added } = mergeMasterPrompts(masterPrompts, importedPrompts);
@@ -2572,6 +2594,7 @@ export default function App() {
         hiddenTools={hiddenTools}
         view={studioView}
         onChangeView={setStudioView}
+        onLogoClick={handleLogoClick}
       />
 
       {/* Main Workspace: Sidebar + Infinite Canvas */}
@@ -2598,7 +2621,13 @@ export default function App() {
             id="selection-bar"
             className="absolute left-1/2 -translate-x-1/2 bottom-9 z-20 flex items-center bg-white text-[13px] ofst-pop shadow-[0_0_0_1px_var(--soft-2)]"
           >
-            <span className="px-2 text-[var(--grey)] tabular-nums">выбрано {selectedCardIds.size}</span>
+            <span className="pl-2 pr-1 text-[var(--grey)] tabular-nums">выбрано {selectedCardIds.size}</span>
+            <span className="pr-1">
+              <Info up>
+                «в позиции» — каждое фото станет товаром в «Продуктах». «одним товаром» — все выбранные станут одним товаром: первое (слева
+                сверху) — исходник, остальные — ракурсы. «в каталог» — переснять их в одном стиле. «в оси» — разложить по сетке товары × ракурсы.
+              </Info>
+            </span>
             <button
               className="ofst-cell"
               title="Каждое фото станет отдельной позицией (товаром)"

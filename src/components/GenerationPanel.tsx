@@ -404,8 +404,8 @@ export function GenerationPanel({
               <button type="button" onClick={onOpenSettings} className="hover:text-[var(--fg)] cursor-pointer" title="Настройки API">
                 настройки
               </button>
-              <button type="button" onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer" title="Закрыть панель (G)">
-                закрыть
+              <button type="button" onClick={onClose} className="ofst-x" title="Закрыть панель (G)" aria-label="Закрыть">
+                ×
               </button>
             </span>
           </div>

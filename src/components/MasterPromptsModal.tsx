@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { MasterPrompt } from '../types';
+import { FloatingWindow } from './FloatingWindow';
 import { PROMPT_CATEGORIES, groupPrompts, promptCategory } from '../utils/promptCategories';
 
 interface MasterPromptsModalProps {
@@ -141,16 +142,7 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
   const filteredPrompts = shownShelves.flatMap((g) => g.items);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/40 ofst-fade" onClick={onClose}>
-      <div className="bg-white w-full max-w-3xl flex flex-col max-h-[94vh] p-2 gap-2" onClick={(e) => e.stopPropagation()}>
-        {/* Head */}
-        <div className="ofst-run shrink-0">
-          <span>Мастер-промпты</span>
-          <span>{masterPrompts.length}</span>
-          <button onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer">
-            закрыть
-          </button>
-        </div>
+    <FloatingWindow id="prompts" title="Мастер-промпты" meta={masterPrompts.length} width={768} onClose={onClose} className="flex flex-col max-h-[88vh] gap-2">
 
         {/* Search + new */}
         {!isCreatingNew && !editingPrompt && (
@@ -312,7 +304,6 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </FloatingWindow>
   );
 };

@@ -59,8 +59,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       <div id="modal-export-content" className="bg-white max-w-md w-full p-2 text-[var(--fg)]" onClick={(e) => e.stopPropagation()}>
         <div className="ofst-run">
           <span>Экспорт</span>
-          <button onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer">
-            закрыть
+          <button onClick={onClose} className="ofst-x" aria-label="Закрыть">
+            ×
           </button>
         </div>
         <ol className="pt-1">

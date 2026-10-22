@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { FloatingWindow } from './FloatingWindow';
 import {
   DEFAULT_IMAGE_MODEL,
   IMAGE_MODEL_OPTIONS,
@@ -50,18 +51,7 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
   const inputClass = 'w-full h-8 px-2 text-[13px]';
 
   return (
-    <div
-      id="modal-settings-backdrop"
-      className="fixed inset-0 bg-black/40 ofst-fade z-[70] flex items-center justify-center p-2 select-none"
-      onClick={onClose}
-    >
-      <div className="bg-white max-w-md w-full p-2 text-[var(--fg)]" onClick={(e) => e.stopPropagation()}>
-        <div className="ofst-run">
-          <span>Доступ к генерации</span>
-          <button onClick={onClose} className="hover:text-[var(--fg)] cursor-pointer" aria-label="Закрыть">
-            закрыть
-          </button>
-        </div>
+    <FloatingWindow id="settings" title="Доступ к генерации" width={448} onClose={onClose} zIndex={70} className="select-none">
 
         <form onSubmit={handleSave} className="space-y-3 pt-2">
           <div>
@@ -149,7 +139,6 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </FloatingWindow>
   );
 }

@@ -92,6 +92,32 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
 .ofst-cell--muted { color: var(--grey); }
 .ofst-cell--muted:hover { color: var(--fg); }
 
+/* Floating window: no dark backdrop, a thin grey edge and a soft shadow so it reads as a sheet on top */
+.ofst-window { border: 1px solid var(--soft-2); box-shadow: 0 10px 40px rgba(10, 10, 10, .08); }
+
+/* Close cross: same size everywhere */
+.ofst-x {
+  display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 16px;
+  font-size: 16px; line-height: 1; color: var(--grey); cursor: pointer; background: transparent; border: 0;
+}
+.ofst-x:hover { color: var(--fg); background: var(--soft); }
+
+/* «i» in a circle: hover or tap to read what this part of the studio is for */
+.ofst-info { position: relative; display: inline-flex; vertical-align: middle; }
+.ofst-info > button {
+  width: 14px; height: 14px; border-radius: 999px !important; border: 1px solid currentColor; color: var(--grey);
+  font: 600 9px/12px var(--font-sans); text-align: center; padding: 0; cursor: help; background: transparent;
+}
+.ofst-info > button:hover, .ofst-info.is-open > button { color: var(--fg); }
+.ofst-info-note {
+  position: fixed; z-index: 200; width: max-content; padding: 6px 8px; background: var(--fg); color: var(--bg);
+  font: 400 12px/1.35 var(--font-sans); letter-spacing: 0; white-space: normal; text-align: left; text-transform: none;
+  pointer-events: none; animation: ofst-fade .12s ease;
+}
+
+/* Checkboxes: one size, no stray margins, so they line up in a column */
+input[type="checkbox"] { margin: 0; width: 13px; height: 13px; flex: none; }
+
 /* Tabs in the top bar: full height, touching the work area below, no gaps */
 .ofst-tab {
   display: inline-flex; align-items: center; height: 100%; padding: 0 12px; border: 0;
