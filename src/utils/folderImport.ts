@@ -63,16 +63,21 @@ export function folderFilesFromInput(files: File[]): FolderFile[] {
     .map((f) => ({ file: f, path: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name }));
 }
 
-/** Splits files by folder. The common top folder is dropped from group names when there are subfolders. */
+/**
+ * Splits files by folder. Folders shared by every file ("smartsat / foto") are dropped from the names,
+ * so each group is named by what makes it different.
+ */
 export function groupByFolder(files: FolderFile[]): { name: string; files: FolderFile[] }[] {
   const dirs = files.map((f) => f.path.split('/').slice(0, -1));
-  const top = dirs.length && dirs.every((d) => d[0] === dirs[0][0]) ? dirs[0][0] : null;
-  const hasSub = dirs.some((d) => d.length > 1);
+  let common = 0;
+  if (dirs.length) {
+    const minLen = Math.min(...dirs.map((d) => d.length));
+    while (common < minLen && dirs.every((d) => d[common] === dirs[0][common])) common++;
+  }
   const map = new Map<string, FolderFile[]>();
   files.forEach((f, i) => {
-    let parts = dirs[i];
-    if (top && hasSub) parts = parts.slice(1);
-    const key = parts.join(' / ') || top || 'Папка';
+    const parts = dirs[i].slice(common);
+    const key = parts.join(' / ') || dirs[i][dirs[i].length - 1] || 'Папка';
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(f);
   });
@@ -80,4 +85,21 @@ export function groupByFolder(files: FolderFile[]): { name: string; files: Folde
   return [...map.entries()]
     .sort((a, b) => collator.compare(a[0], b[0]))
     .map(([name, fs]) => ({ name, files: fs.sort((a, b) => collator.compare(a.path, b.path)) }));
+}
+
+/**
+ * Copies picked files into memory. A file from a folder picker can become unreadable once the input is
+ * cleared, and the «куда загрузить?» question reads them later.
+ */
+export async function snapshotFolderFiles(files: FolderFile[]): Promise<FolderFile[]> {
+  const out: FolderFile[] = [];
+  for (const f of files) {
+    try {
+      const buf = await f.file.arrayBuffer();
+      out.push({ path: f.path, file: new File([buf], f.file.name, { type: f.file.type, lastModified: f.file.lastModified }) });
+    } catch {
+      // unreadable: skip
+    }
+  }
+  return out;
 }

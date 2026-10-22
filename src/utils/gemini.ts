@@ -1,6 +1,6 @@
 import { Card } from '../types';
 import { SOURCE_FIX_MARKER } from './storage';
-import { rolesPrompt } from './referenceRoles';
+import { isProductPhoto, rolesPrompt } from './referenceRoles';
 
 export const API_KEY_STORAGE_KEY = 'aips_api_key';
 export const STUDIO_PASSWORD_STORAGE_KEY = 'aips_studio_password';
@@ -405,8 +405,13 @@ export async function generateImageWithGemini(
     const roleLines = referenceCards
       .slice(0, 5)
       .map((card, i) => {
+        const n = i + 1 + offset;
         const what = rolesPrompt(card.takes);
-        return what ? `с изображения ${i + 1 + offset} возьми только ${what}` : '';
+        const product = isProductPhoto(card.takes)
+          ? `изображение ${n} — это сам товар клиента: перенеси его точно, не меняя форму, пропорции, цвет, материал, надписи и логотип`
+          : '';
+        const take = what ? `с изображения ${n} возьми только ${what}` : '';
+        return [product, take].filter(Boolean).join(', а ');
       })
       .filter(Boolean);
     if (roleLines.length > 0) {

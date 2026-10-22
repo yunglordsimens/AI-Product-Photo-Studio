@@ -4,7 +4,8 @@ import { compressImageDataUrl } from '../utils/storage';
 import { ImageCropModal } from './ImageCropModal';
 import { normalizeImageFiles, isImageFile } from '../utils/heic';
 import { PRODUCT_DRAG_TYPE } from '../utils/dragTypes';
-import { folderFilesFromInput, groupByFolder } from '../utils/folderImport';
+import { folderFilesFromInput, snapshotFolderFiles } from '../utils/folderImport';
+import { ensureVariantCols, folderImportNote, importFolderToPositions } from '../utils/positionsImport';
 import { EXPORT_PRESETS, EXPORT_SIZES, ExportPhotos, ExportPreset, ExportSize, FitMode, exportPositions } from '../utils/positionsExport';
 import { NO_GROUP, SLOT_DRAG_TYPE, SlotRef, groupByCategory, mergeInto, movePhoto, renameCategory, setCategory, slotSet } from '../utils/positions';
 
@@ -71,14 +72,22 @@ const normName = (s: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-/** Names from a CSV (column "name"/"název"/"название", else first column), a JSON array, or plain lines. */
-function parseNameList(text: string, fileName: string): string[] {
+type ListRow = { name: string; sku?: string; price?: string; category?: string };
+
+/** Rows from a CSV (columns name / id / price / category), a JSON array, or plain lines. */
+function parseNameList(text: string, fileName: string): ListRow[] {
   const t = text.replace(/^\uFEFF/, '');
   if (/\.json$/i.test(fileName)) {
     try {
       const data = JSON.parse(t);
       const arr = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
-      return arr.map((x: any) => (typeof x === 'string' ? x : x?.name || x?.title || '')).filter(Boolean);
+      return arr
+        .map((x: any): ListRow =>
+          typeof x === 'string'
+            ? { name: x }
+            : { name: x?.name || x?.title || '', sku: x?.sku || x?.id ? String(x.sku || x.id) : undefined, price: x?.price ? String(x.price) : undefined, category: x?.category }
+        )
+        .filter((r: ListRow) => r.name);
     } catch {
       return [];
     }
@@ -101,9 +110,21 @@ function parseNameList(text: string, fileName: string): string[] {
   }
   if (rows.length === 0) return [];
   const header = rows[0].map((h) => h.toLowerCase());
-  const col = header.findIndex((h) => ['name', 'název', 'nazev', 'название', 'title', 'product'].includes(h));
-  if (col >= 0) return rows.slice(1).map((r) => r[col]).filter(Boolean);
-  return rows.map((r) => r[0]).filter(Boolean);
+  const find = (keys: string[]) => header.findIndex((h) => keys.includes(h));
+  const col = find(['name', 'název', 'nazev', 'название', 'назва', 'title', 'product']);
+  if (col < 0) return rows.map((r) => ({ name: r[0] })).filter((r) => r.name);
+  const skuCol = find(['id', 'sku', 'код', 'kód', 'artikul', 'артикул']);
+  const priceCol = find(['price', 'cena', 'цена', 'ціна']);
+  const catCol = find(['category', 'kategorie', 'категория', 'категорія', 'group', 'группа']);
+  return rows
+    .slice(1)
+    .map((r) => ({
+      name: r[col],
+      sku: skuCol >= 0 ? r[skuCol] || undefined : undefined,
+      price: priceCol >= 0 ? r[priceCol] || undefined : undefined,
+      category: catCol >= 0 ? r[catCol] || undefined : undefined,
+    }))
+    .filter((r) => r.name);
 }
 
 
@@ -249,60 +270,52 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
   };
 
   const handleBatchPhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const picked: File[] = e.target.files ? Array.from(e.target.files) : [];
-    e.target.value = '';
-    // Each subfolder becomes a group of positions, the same as dropping the folder on the board
-    const folders = groupByFolder(folderFilesFromInput(picked.filter((f) => isImageFile(f) && !f.name.startsWith('.'))));
-    const total = folders.reduce((n, g) => n + g.files.length, 0);
-    if (total === 0) return;
-    let next = [...localProducts];
-    let added = 0;
-    let filled = 0;
-    let done = 0;
-    const single = folders.length === 1;
-    for (const g of folders) {
-      const images = await normalizeImageFiles(g.files.map((f) => f.file));
-      for (let i = 0; i < images.length; i++) {
-        setBatchNote(`Фото ${++done} из ${total}…`);
-        const raw = await new Promise<string>((resolve) => {
-          const r = new FileReader();
-          r.onload = () => resolve(r.result as string);
-          r.onerror = () => resolve('');
-          r.readAsDataURL(images[i]);
-        });
-        if (!raw) continue;
-        const photo = await compressImageDataUrl(raw, 1200, 0.85);
-        const name = images[i].name.replace(/\.[^.]+$/, '');
-        const category = single ? undefined : g.name;
-        const idx = next.findIndex((p) => normName(p.name) === normName(name));
-        if (idx >= 0) {
-          next[idx] = { ...next[idx], photoDataUrl: photo, category: next[idx].category || category };
-          filled++;
-        } else {
-          next.push({ id: `prod_${Date.now()}_${done}_${Math.random().toString(36).substr(2, 4)}`, name, photoDataUrl: photo, category });
-          added++;
-        }
-      }
-    }
-    commit(next);
-    setBatchNote(
-      `Готово: новых ${added}, фото добавлено к существующим ${filled}${single ? '' : `, групп по папкам: ${folders.length}`}.`
-    );
+    const input = e.target;
+    const picked: File[] = input.files ? Array.from(input.files) : [];
+    const files = await snapshotFolderFiles(folderFilesFromInput(picked.filter((f) => isImageFile(f) && !f.name.startsWith('.'))));
+    input.value = '';
+    if (files.length === 0) return;
+    const r = await importFolderToPositions(files, localProducts, (done, total) => setBatchNote(`Фото ${done} из ${total}…`));
+    commit(r.next);
+    if (r.maxPhotos > 1) ensureVariantCols(r.maxPhotos - 1);
+    setBatchNote(folderImportNote(r));
   };
 
   const handleBatchList = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const names = parseNameList(await file.text(), file.name);
-    const existing = new Set(localProducts.map((p) => normName(p.name)));
-    const fresh = [...new Set(names.map((n) => n.trim()))].filter((n) => n && !existing.has(normName(n)));
-    commit([
-      ...localProducts,
-      ...fresh.map((name, i) => ({ id: `prod_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`, name, photoDataUrl: '' })),
-    ]);
-    setBatchNote(`Из списка добавлено ${fresh.length} позиций. Теперь можно загрузить папку с фото — они подставятся по названию.`);
+    const list = parseNameList(await file.text(), file.name);
+    // Match by code first (a folder «785756834 - …» has it), then by name: full names and prices come from the list
+    const next = [...localProducts];
+    let added = 0;
+    let updated = 0;
+    const seen = new Set<string>();
+    list.forEach((row, i) => {
+      const key = row.sku || normName(row.name);
+      if (seen.has(key)) return;
+      seen.add(key);
+      const idx = next.findIndex((p) => (row.sku && p.sku === row.sku) || normName(p.name) === normName(row.name));
+      if (idx >= 0) {
+        const p = next[idx];
+        next[idx] = { ...p, name: row.name || p.name, sku: p.sku || row.sku, price: row.price || p.price, category: p.category || row.category };
+        updated++;
+      } else {
+        next.push({ id: `prod_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`, name: row.name, sku: row.sku, price: row.price, category: row.category, photoDataUrl: '' });
+        added++;
+      }
+    });
+    commit(next);
+    setBatchNote(
+      `Из списка: новых ${added}, обновлено ${updated} (полные названия, коды, цены). Фото из папки подставятся по коду или названию.`
+    );
   };
+
+  useEffect(() => {
+    const on = (e: Event) => setVariantCols(Number((e as CustomEvent).detail) || 2);
+    window.addEventListener('aips-variant-cols', on);
+    return () => window.removeEventListener('aips-variant-cols', on);
+  }, []);
 
   const changeVariantCols = (n: number) => {
     const v = Math.max(0, Math.min(8, n));

@@ -5,6 +5,8 @@ import { REFERENCE_ROLES } from '../utils/referenceRoles';
 interface CardItemProps {
   card: Card;
   isSelected: boolean;
+  /** The only selected photo: its actions stay visible (on touch there is no hover) */
+  isSoleSelected?: boolean;
   /** Faded back while another group is in focus */
   dimmed?: boolean;
   isConnectingSource?: boolean;
@@ -37,6 +39,7 @@ export const CardItem: React.FC<CardItemProps> = memo(
   ({
     card,
     isSelected,
+    isSoleSelected = false,
     dimmed = false,
     isConnectingSource = false,
     isConnectionMode = false,
@@ -92,7 +95,7 @@ export const CardItem: React.FC<CardItemProps> = memo(
         {!isConnectionMode && (
           <div
             className={`absolute bottom-full right-0 flex bg-white text-[11px] z-20 ${
-              isSelected ? 'flex' : 'hidden group-hover:flex'
+              isSoleSelected ? 'flex' : 'hidden group-hover:flex'
             }`}
             {...stop}
           >
@@ -231,8 +234,10 @@ export const CardItem: React.FC<CardItemProps> = memo(
                     const next = on ? (card.takes || []).filter((t) => t !== r.id) : [...(card.takes || []), r.id];
                     onChangeTakes(card.id, next);
                   }}
-                  className={`px-0.5 cursor-pointer ${on ? 'bg-[var(--fg)] text-white' : 'text-[var(--grey)] hover:text-[var(--fg)]'}`}
-                  title={on ? 'Не брать' : 'Брать с этого фото'}
+                  className={`px-0.5 cursor-pointer ${
+                    on ? (r.id === 'product' ? 'bg-[var(--marker)] text-[var(--fg)]' : 'bg-[var(--fg)] text-white') : 'text-[var(--grey)] hover:text-[var(--fg)]'
+                  }`}
+                  title={r.id === 'product' ? (on ? 'Это не товар' : 'Это фото самого товара: его сохраним точно') : on ? 'Не брать' : 'Брать с этого фото'}
                 >
                   {r.label}
                 </button>

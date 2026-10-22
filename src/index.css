@@ -92,6 +92,15 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
 .ofst-cell--muted { color: var(--grey); }
 .ofst-cell--muted:hover { color: var(--fg); }
 
+/* Tabs in the top bar: full height, touching the work area below, no gaps */
+.ofst-tab {
+  display: inline-flex; align-items: center; height: 100%; padding: 0 12px; border: 0;
+  background: transparent; color: var(--grey); font: 500 13px/1 var(--font-sans); white-space: nowrap; cursor: pointer;
+  transition: background-color .15s ease, color .15s ease;
+}
+.ofst-tab:hover { color: var(--fg); background: var(--soft); }
+.ofst-tab.is-on { background: var(--fg); color: var(--bg); }
+
 /* One outline for everything that is "chosen": selected photo, final ★, drop target, selected note */
 .ofst-outline, .hover\:ofst-outline:hover {
   outline: calc(1px / var(--canvas-zoom, 1)) solid var(--fg);

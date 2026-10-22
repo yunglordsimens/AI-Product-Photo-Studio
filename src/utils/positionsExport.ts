@@ -180,29 +180,29 @@ export async function exportPositions(
   if (opts.preset === 'names') {
     entries.push({
       name: 'positions.csv',
-      data: csv([['Название', 'Категория', 'Файл'], ...rows.map((r) => [r.p.name, r.p.category || '', r.files.join(' | ')])]),
+      data: csv([['Название', 'Категория', 'Код', 'Цена', 'Файл'], ...rows.map((r) => [r.p.name, r.p.category || '', r.p.sku || '', r.p.price || '', r.files.join(' | ')])]),
     });
   } else if (opts.preset === 'shopify') {
-    const header = ['Handle', 'Title', 'Body (HTML)', 'Vendor', 'Type', 'Tags', 'Published', 'Status', 'Image Src', 'Image Position', 'Image Alt Text'];
+    const header = ['Handle', 'Title', 'Body (HTML)', 'Vendor', 'Type', 'Tags', 'Published', 'Status', 'Variant SKU', 'Variant Price', 'Image Src', 'Image Position', 'Image Alt Text'];
     const lines: (string | number)[][] = [header];
     rows.forEach((r) => {
       const imgs = r.files.length ? r.files : [''];
       imgs.forEach((f, i) => {
         lines.push(
           i === 0
-            ? [r.handle, r.p.name, '', opts.projectName, r.p.category || '', r.p.category || '', 'TRUE', 'draft', joinUrl(opts.baseUrl, f), f ? 1 : '', r.p.name]
-            : [r.handle, '', '', '', '', '', '', '', joinUrl(opts.baseUrl, f), i + 1, r.p.name]
+            ? [r.handle, r.p.name, '', opts.projectName, r.p.category || '', r.p.category || '', 'TRUE', 'draft', r.p.sku || '', r.p.price || '', joinUrl(opts.baseUrl, f), f ? 1 : '', r.p.name]
+            : [r.handle, '', '', '', '', '', '', '', '', '', joinUrl(opts.baseUrl, f), i + 1, r.p.name]
         );
       });
     });
     entries.push({ name: 'products.csv', data: csv(lines) });
   } else {
-    const header = ['Type', 'SKU', 'Name', 'Published', 'Categories', 'Images'];
+    const header = ['Type', 'SKU', 'Name', 'Published', 'Regular price', 'Categories', 'Images'];
     entries.push({
       name: 'products.csv',
       data: csv([
         header,
-        ...rows.map((r) => ['simple', r.handle, r.p.name, 1, r.p.category || '', r.files.map((f) => joinUrl(opts.baseUrl, f)).filter(Boolean).join(', ')]),
+        ...rows.map((r) => ['simple', r.p.sku || r.handle, r.p.name, 1, r.p.price || '', r.p.category || '', r.files.map((f) => joinUrl(opts.baseUrl, f)).filter(Boolean).join(', ')]),
       ]),
     });
   }

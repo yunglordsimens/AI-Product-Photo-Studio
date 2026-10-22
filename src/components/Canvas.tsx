@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import { BoardMatrixView, MatrixApi } from './BoardMatrixView';
 import { Card, CardGroup, Connection, MarqueeBox, Note, NoteColor, Project, SiteMockup } from '../types';
 import { CardItem } from './CardItem';
 import { NoteItem } from './NoteItem';
@@ -48,6 +49,14 @@ interface CanvasProps {
   onSelectConnection?: (connectionId: string | null) => void;
   onGroupSelected?: () => void;
   onUngroup?: (groupId: string) => void;
+  onRenameGroup?: (groupId: string, name: string) => void;
+  /** The group becomes one position: first photo = original, the rest = angles */
+  onGroupToPosition?: (groupId: string) => void;
+  /** «Оси» grids on the board */
+  matrixApi?: MatrixApi;
+  onAddMatrix?: (at: { x: number; y: number }) => void;
+  /** Cards were dragged and let go on the board (not on a position) */
+  onCardsDragEnd?: (cardIds: string[]) => void;
   onAnalyzeStyle?: () => void;
   onUpdateSiteMockup?: (mockup: SiteMockup | undefined) => void;
   onDeleteSiteMockup?: () => void;
@@ -94,6 +103,11 @@ export const Canvas: React.FC<CanvasProps> = ({
   onSelectConnection,
   onGroupSelected,
   onUngroup,
+  onRenameGroup,
+  onGroupToPosition,
+  matrixApi,
+  onAddMatrix,
+  onCardsDragEnd,
   onAnalyzeStyle,
   onUpdateSiteMockup,
   onDeleteSiteMockup,
@@ -761,6 +775,8 @@ export const Canvas: React.FC<CanvasProps> = ({
     dropTargetRef.current = el;
   };
   const onDropCardsOnPositionRef = useRef(onDropCardsOnPosition);
+  const onCardsDragEndRef = useRef(onCardsDragEnd);
+  onCardsDragEndRef.current = onCardsDragEnd;
   onDropCardsOnPositionRef.current = onDropCardsOnPosition;
 
   // Global mouse move and up handlers
@@ -929,6 +945,8 @@ export const Canvas: React.FC<CanvasProps> = ({
           }
         }
         if (positionId) onDropCardsOnPositionRef.current(ids, positionId, slotAttr !== undefined ? Number(slotAttr) : undefined);
+      } else if (isDraggingCardsRef.current && dragStartPositionsRef.current && onCardsDragEndRef.current) {
+        onCardsDragEndRef.current([...draggedCardIdsRef.current]);
       }
       dragStartPositionsRef.current = null;
       isPanningRef.current = false;
@@ -1264,6 +1282,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   // Canvas Touch End / Cancel
   const handleCanvasTouchEnd = () => {
+    if (touchStateRef.current.mode === 'drag-card' && onCardsDragEndRef.current) onCardsDragEndRef.current([...draggedCardIdsRef.current]);
     touchStateRef.current.mode = 'idle';
     isDraggingCardsRef.current = false;
     isDraggingNotesRef.current = false;
@@ -1464,6 +1483,12 @@ export const Canvas: React.FC<CanvasProps> = ({
           </div>
         )}
 
+        {/* «Оси»: grids under the photos */}
+        {matrixApi &&
+          (project.matrices || []).map((m) => (
+            <BoardMatrixView key={m.id} matrix={m} cards={project.cards || []} zoom={zoom} api={matrixApi} dimmed={Boolean(focusGroupId)} />
+          ))}
+
         {/* Render Groups */}
         {project.groups?.map((group) => {
           const memberCards = (project.cards || []).filter((c) =>
@@ -1493,9 +1518,9 @@ export const Canvas: React.FC<CanvasProps> = ({
               className="absolute pointer-events-auto cursor-grab active:cursor-grabbing group/grp select-none"
               onMouseDown={(e) => handleGroupMouseDown(e, group)}
             >
-              <div className="absolute top-1 left-1 flex items-baseline gap-1.5 text-[12px] leading-4 select-none">
+              <div className="absolute top-1 left-1 flex items-baseline gap-1.5 text-[12px] leading-4 select-none whitespace-nowrap">
                 <span className="w-2 h-2 self-center" style={{ backgroundColor: group.color || '#0a0a0a' }} />
-                <span>{group.name || 'Группа'}</span>
+                <GroupName name={group.name || 'Группа'} onRename={onRenameGroup ? (n) => onRenameGroup(group.id, n) : undefined} />
                 <span className="text-[var(--grey)] tabular-nums">{memberCards.length}</span>
                 <span
                   className={`flex gap-2 ${
@@ -1514,6 +1539,19 @@ export const Canvas: React.FC<CanvasProps> = ({
                   >
                     {focusGroupId === group.id ? 'выйти из фокуса' : 'фокус'}
                   </button>
+                  {onGroupToPosition && (
+                    <button
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onGroupToPosition(group.id);
+                      }}
+                      className="text-[var(--grey)] hover:text-[var(--fg)] underline cursor-pointer"
+                      title="Вся группа станет одной позицией: первое фото — исходник, остальные — ракурсы"
+                    >
+                      в позицию
+                    </button>
+                  )}
                   {onUngroup && (
                     <button
                       onMouseDown={(e) => e.stopPropagation()}
@@ -1658,6 +1696,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             key={card.id}
             card={card}
             isSelected={selectedCardIds.has(card.id)}
+            isSoleSelected={selectedCardIds.size === 1 && selectedCardIds.has(card.id)}
             dimmed={Boolean(focusGroupId) && !focusIds.has(card.id)}
             isConnectingSource={connectingSourceCardId === card.id}
             isConnectionMode={isConnectionMode}
@@ -1701,9 +1740,14 @@ export const Canvas: React.FC<CanvasProps> = ({
       {contextMenu.visible && (
         <div
           id="canvas-context-menu"
-          style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
-          className="fixed z-50 bg-white min-w-[200px] text-[13px] text-[var(--fg)] ofst-pop"
+          style={{
+            left: `${Math.max(8, Math.min(contextMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 1440) - 290))}px`,
+            top: `${Math.max(8, Math.min(contextMenu.y, (typeof window !== 'undefined' ? window.innerHeight : 900) - 260))}px`,
+          }}
+          className="fixed z-50 bg-white min-w-[200px] text-[13px] text-[var(--fg)] ofst-pop whitespace-nowrap"
           onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
         >
           {onImportFolder && (
             <>
@@ -1726,6 +1770,18 @@ export const Canvas: React.FC<CanvasProps> = ({
                 <span>Папка фото на доску</span>
               </button>
             </>
+          )}
+          {onAddMatrix && (
+            <button
+              onClick={() => {
+                onAddMatrix(screenToCanvas(contextMenu.x, contextMenu.y));
+                setContextMenu((prev) => ({ ...prev, visible: false }));
+              }}
+              className="w-full px-2 h-7 text-left hover:bg-[var(--soft)] flex items-center cursor-pointer"
+              title="Сетка: строки — товары, столбцы — ракурсы. Фото, брошенные в клетку, встают ровно"
+            >
+              <span>Оси здесь (товары × ракурсы)</span>
+            </button>
           )}
           {selectedCardIds.size > 1 && onGroupSelected && (
             <button
@@ -1935,3 +1991,47 @@ const EmptyAddButton: React.FC<{ onFiles: () => void; onFolder?: () => void }> =
     </div>
   );
 };
+
+/** Group name on the board: double-click to rename, Enter to keep, Esc to cancel */
+function GroupName({ name, onRename }: { name: string; onRename?: (name: string) => void }) {
+  const [editing, setEditing] = React.useState(false);
+  const [text, setText] = React.useState(name);
+  React.useEffect(() => setText(name), [name]);
+  if (!editing || !onRename) {
+    return (
+      <span
+        onDoubleClick={(e) => {
+          if (!onRename) return;
+          e.stopPropagation();
+          setEditing(true);
+        }}
+        className={onRename ? 'cursor-text' : ''}
+        title={onRename ? 'Двойной клик — переименовать' : undefined}
+      >
+        {name}
+      </span>
+    );
+  }
+  const finish = (keep: boolean) => {
+    setEditing(false);
+    if (keep && text.trim() && text.trim() !== name) onRename(text.trim());
+    else setText(name);
+  };
+  return (
+    <input
+      autoFocus
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onMouseDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') finish(true);
+        if (e.key === 'Escape') finish(false);
+      }}
+      onBlur={() => finish(true)}
+      onFocus={(e) => e.target.select()}
+      className="h-4 px-0.5 text-[12px] bg-white min-w-[120px] select-text"
+      style={{ width: `${Math.max(12, text.length + 2)}ch` }}
+    />
+  );
+}

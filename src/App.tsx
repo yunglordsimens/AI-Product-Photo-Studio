@@ -10,6 +10,7 @@ import {
   Project,
   SiteMockup,
   StorageInfo,
+  BoardMatrix,
 } from './types';
 import {
   loadProjects,
@@ -36,7 +37,10 @@ import { compressAndLoadImage, compressDataUrl, createSampleCard } from './utils
 import { getStoredApiKey, hasGenerationAccess, generateImageWithGemini, analyzeStyleWithGemini, getImageModel } from './utils/gemini';
 import { SOURCE_FIX_MARKER } from './utils/storage';
 import { isImageFile, normalizeImageFiles } from './utils/heic';
-import { FolderFile, groupByFolder, folderFilesFromInput } from './utils/folderImport';
+import { FolderFile, groupByFolder, folderFilesFromInput, snapshotFolderFiles } from './utils/folderImport';
+import { ensureVariantCols, folderImportNote, importFolderToPositions, isGenericName, splitSku } from './utils/positionsImport';
+import { MATRIX_LABEL_H, MATRIX_LABEL_W, addLine, isOverMatrix, matrixFromGroups, matrixToPositionDrafts, membersOf, newMatrix, removeLine, snapIntoMatrix, transposeMatrix } from './utils/matrix';
+import type { MatrixApi } from './components/BoardMatrixView';
 import { TopBar, TOOL_LABELS, StudioView } from './components/TopBar';
 import { VideoTab } from './components/VideoTab';
 import { useUndo } from './hooks/useUndo';
@@ -133,8 +137,19 @@ export default function App() {
       return 'board';
     }
   });
+  // Switching tabs folds the side panels (products, prompts, AI, menu) so nothing stays layered on top.
+  // The projects column stays: it only hides with «скрыть».
   const setStudioView = useCallback((v: StudioView) => {
-    setStudioViewState(v);
+    setStudioViewState((prev) => {
+      if (prev !== v) {
+        setIsProductLibraryOpen(false);
+        setIsGenerationOpen(false);
+        setIsRightDrawerOpen(false);
+        setIsMasterPromptsOpen(false);
+        setIsStyleAnalysisOpen(false);
+      }
+      return v;
+    });
     try {
       localStorage.setItem('aips_view', v);
     } catch {}
@@ -629,7 +644,7 @@ export default function App() {
           newGroups.push({
             id: `group_dir_${Date.now()}_${gi}_${Math.random().toString(36).substr(2, 4)}`,
             type: 'group',
-            name: g.name,
+            name: g.name.split(' / ').map((part, k, arr) => (k === arr.length - 1 ? splitSku(part).name : part)).join(' / '),
             children: groupCardIds,
             x: 0,
             y: 0,
@@ -667,45 +682,14 @@ export default function App() {
 
   const handleImportFolderAsProducts = useCallback(
     async (folderFiles: FolderFile[]) => {
-      const groupsIn = groupByFolder(folderFiles);
-      const norm = (t: string) => t.normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim();
-      const next = [...productsList];
-      let added = 0;
-      let filled = 0;
-      let done = 0;
-      for (const g of groupsIn) {
-        const files = await normalizeImageFiles(g.files.map((f) => f.file));
-        for (const file of files) {
-          setFolderImportStatus(`Продукты: ${++done} из ${folderFiles.length} — ${g.name}`);
-          const raw = await new Promise<string>((resolve) => {
-            const r = new FileReader();
-            r.onload = () => resolve(r.result as string);
-            r.onerror = () => resolve('');
-            r.readAsDataURL(file);
-          });
-          if (!raw) continue;
-          const photo = await compressImageDataUrl(raw, 1200, 0.85);
-          const name = file.name.replace(/\.[^.]+$/, '');
-          const idx = next.findIndex((p) => norm(p.name) === norm(name));
-          if (idx >= 0) {
-            next[idx] = { ...next[idx], photoDataUrl: photo, category: next[idx].category || g.name };
-            filled++;
-          } else {
-            next.push({
-              id: `prod_${Date.now()}_${done}_${Math.random().toString(36).substr(2, 4)}`,
-              name,
-              photoDataUrl: photo,
-              category: g.name,
-            });
-            added++;
-          }
-        }
-      }
-      setFolderImportStatus(null);
-      setProductsList(next);
-      saveProjectProducts(activeProjectId, next);
-      setFolderImportStatus(`Продукты: добавлено ${added}, фото обновлено у ${filled}.`);
-      setTimeout(() => setFolderImportStatus(null), 6000);
+      const r = await importFolderToPositions(folderFiles, productsList, (done, total, label) =>
+        setFolderImportStatus(`Позиции: ${done} из ${total} — ${label}`)
+      );
+      setProductsList(r.next);
+      saveProjectProducts(activeProjectId, r.next);
+      if (r.maxPhotos > 1) ensureVariantCols(r.maxPhotos - 1);
+      setFolderImportStatus(folderImportNote(r));
+      setTimeout(() => setFolderImportStatus(null), 8000);
       setIsProductLibraryOpen(true);
     },
     [productsList, activeProjectId]
@@ -715,11 +699,12 @@ export default function App() {
   const folderModeRef = useRef<'ask' | 'products' | 'board'>('ask');
   const handleFolderInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files: File[] = e.target.files ? Array.from(e.target.files) : [];
-    e.target.value = '';
     const mode = folderModeRef.current;
     folderModeRef.current = 'ask';
     if (files.length === 0) return;
-    const ff = folderFilesFromInput(files);
+    // read into memory first: the files must stay readable while the «куда?» question is open
+    const ff = await snapshotFolderFiles(folderFilesFromInput(files));
+    e.target.value = '';
     if (mode === 'products') await handleImportFolderAsProducts(ff);
     else if (mode === 'board') await handleAddFolder(ff);
     else askAboutFolder(ff);
@@ -1909,6 +1894,208 @@ export default function App() {
     [activeProject, projects, saveProjectsToStorage]
   );
 
+  const handleRenameGroup = useCallback(
+    (groupId: string, name: string) => {
+      const clean = name.trim();
+      if (!clean) return;
+      saveProjectsToStorage(
+        projects.map((p) =>
+          p.id === activeProject.id
+            ? { ...p, groups: (p.groups || []).map((g) => (g.id === groupId ? { ...g, name: clean } : g)), updatedAt: Date.now() }
+            : p
+        )
+      );
+    },
+    [activeProject, projects, saveProjectsToStorage]
+  );
+
+  // ---- Board → positions / catalog ----
+  /** Left to right, row by row, the way the photos are laid out */
+  const readingOrder = (cards: Card[]) =>
+    [...cards].sort((a, b) => Math.round(a.y / 160) - Math.round(b.y / 160) || a.x - b.x);
+  const groupOfCard = (cardId: string) => (activeProject.groups || []).find((g) => g.children.includes(cardId));
+
+  /** 'each': one position per photo. 'one': one position, first photo = original, the rest = angles */
+  const handleCardsToPositions = useCallback(
+    async (cardIds: string[], mode: 'each' | 'one', name?: string) => {
+      const cards = readingOrder((activeProject.cards || []).filter((c) => cardIds.includes(c.id) && c.src));
+      if (cards.length === 0) return;
+      const photos = await Promise.all(cards.map((c) => compressImageDataUrl(c.src, 1200, 0.85)));
+      const id = (n: number) => `prod_${Date.now()}_${n}_${Math.random().toString(36).slice(2, 6)}`;
+      let fresh: ProductItem[];
+      if (mode === 'one') {
+        const g = groupOfCard(cards[0].id);
+        fresh = [
+          {
+            id: id(0),
+            name: name || g?.name || cards[0].name || 'Товар',
+            photoDataUrl: photos[0],
+            variants: photos.slice(1),
+          },
+        ];
+        if (photos.length > 1) ensureVariantCols(photos.length - 1);
+      } else {
+        fresh = cards.map((c, i) => ({ id: id(i), name: c.name || `Фото ${i + 1}`, photoDataUrl: photos[i], category: groupOfCard(c.id)?.name }));
+      }
+      handleSaveProducts([...latestProductsRef.current, ...fresh]);
+      setIsProductLibraryOpen(true);
+      setFolderImportStatus(
+        mode === 'one' ? `В позиции: «${fresh[0].name}», фото ${photos.length} (первое — исходник, остальные — ракурсы).` : `В позиции добавлено ${fresh.length}.`
+      );
+      setTimeout(() => setFolderImportStatus(null), 6000);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeProject, handleSaveProducts]
+  );
+
+  // ---- «Оси»: grids on the board ----
+  const patchActive = useCallback(
+    (fn: (p: Project) => Project) => {
+      saveProjectsToStorage(latestProjectsRef.current.map((p) => (p.id === activeProjectId ? { ...fn(p), updatedAt: Date.now() } : p)));
+    },
+    [activeProjectId, saveProjectsToStorage]
+  );
+  const withMatrix = useCallback(
+    (id: string, fn: (m: BoardMatrix, cards: Card[]) => { matrix: BoardMatrix | null; cards?: Card[] }) =>
+      patchActive((p) => {
+        const m = (p.matrices || []).find((x) => x.id === id);
+        if (!m) return p;
+        const r = fn(m, p.cards || []);
+        const matrices = r.matrix ? (p.matrices || []).map((x) => (x.id === id ? r.matrix! : x)) : (p.matrices || []).filter((x) => x.id !== id);
+        return { ...p, matrices, cards: r.cards || p.cards };
+      }),
+    [patchActive]
+  );
+  const matrixDragRef = useRef<{ id: string; m: BoardMatrix; cards: Map<string, { x: number; y: number }> } | null>(null);
+  const handleMatrixToPositions = useCallback(
+    (id: string) => {
+      const p = latestProjectsRef.current.find((x) => x.id === activeProjectId);
+      const m = p?.matrices?.find((x) => x.id === id);
+      if (!p || !m) return;
+      const drafts = matrixToPositionDrafts(m, p.cards || []);
+      if (drafts.length === 0) return;
+      (async () => {
+        const fresh: ProductItem[] = [];
+        let n = 0;
+        for (const d of drafts) {
+          const photo = await compressImageDataUrl(d.photoDataUrl, 1200, 0.85);
+          const variants = await Promise.all((d.variants || []).map((v) => (v ? compressImageDataUrl(v, 1200, 0.85) : Promise.resolve(null))));
+          fresh.push({ ...d, id: `prod_${Date.now()}_${n++}_${Math.random().toString(36).slice(2, 6)}`, photoDataUrl: photo, variants, category: m.name && m.name !== 'Оси' ? m.name : undefined });
+        }
+        const maxVariants = Math.max(0, ...fresh.map((f) => f.variants?.length || 0));
+        if (maxVariants) ensureVariantCols(maxVariants);
+        handleSaveProducts([...latestProductsRef.current, ...fresh]);
+        setIsProductLibraryOpen(true);
+        setFolderImportStatus(`Из осей в позиции: ${fresh.length}. Ракурсы легли в колонки по порядку.`);
+        setTimeout(() => setFolderImportStatus(null), 6000);
+      })();
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeProjectId, handleSaveProducts]
+  );
+  const matrixApi: MatrixApi = useMemo(
+    () => ({
+      update: (m) => withMatrix(m.id, () => ({ matrix: m })),
+      remove: (id) => withMatrix(id, () => ({ matrix: null })),
+      transpose: (id) => withMatrix(id, (m, cards) => transposeMatrix(m, cards)),
+      toPositions: handleMatrixToPositions,
+      addLine: (id, axis) => withMatrix(id, (m) => ({ matrix: addLine(m, axis) })),
+      removeLine: (id, axis, idx) => withMatrix(id, (m, cards) => removeLine(m, axis, idx, cards)),
+      drag: (id, dx, dy, phase) => {
+        const p = latestProjectsRef.current.find((x) => x.id === activeProjectId);
+        if (phase === 'start') {
+          const m = p?.matrices?.find((x) => x.id === id);
+          if (!m || !p) return;
+          const members = membersOf(m, p.cards || []);
+          matrixDragRef.current = { id, m, cards: new Map((p.cards || []).filter((c) => members.has(c.id)).map((c) => [c.id, { x: c.x, y: c.y }])) };
+          return;
+        }
+        const start = matrixDragRef.current;
+        if (!start || start.id !== id) return;
+        withMatrix(id, (_m, cards) => ({
+          matrix: { ...start.m, x: Math.round(start.m.x + dx), y: Math.round(start.m.y + dy) },
+          cards: cards.map((c) => {
+            const o = start.cards.get(c.id);
+            return o ? { ...c, x: Math.round(o.x + dx), y: Math.round(o.y + dy) } : c;
+          }),
+        }));
+        if (phase === 'end') matrixDragRef.current = null;
+      },
+    }),
+    [withMatrix, handleMatrixToPositions, activeProjectId]
+  );
+  const handleAddMatrix = useCallback(
+    (at: { x: number; y: number }) =>
+      patchActive((p) => ({ ...p, matrices: [...(p.matrices || []), newMatrix(Math.round(at.x + MATRIX_LABEL_W), Math.round(at.y + MATRIX_LABEL_H + 30))] })),
+    [patchActive]
+  );
+  /** Selected photos → a grid: each group (or each loose photo) becomes a product line */
+  const handleCardsToMatrix = useCallback(
+    (cardIds: string[]) =>
+      patchActive((p) => {
+        const sel = readingOrder((p.cards || []).filter((c) => cardIds.includes(c.id)));
+        if (sel.length === 0) return p;
+        const lines: { name: string; cards: Card[] }[] = [];
+        const byGroup = new Map<string, { name: string; cards: Card[] }>();
+        sel.forEach((c) => {
+          const g = (p.groups || []).find((x) => x.children.includes(c.id));
+          if (g) {
+            if (!byGroup.has(g.id)) {
+              const line = { name: g.name || 'Товар', cards: [] as Card[] };
+              byGroup.set(g.id, line);
+              lines.push(line);
+            }
+            byGroup.get(g.id)!.cards.push(c);
+          } else lines.push({ name: c.name || `Товар ${lines.length + 1}`, cards: [c] });
+        });
+        const minX = Math.min(...sel.map((c) => c.x));
+        const maxY = Math.max(...(p.cards || []).map((c) => c.y + (c.height || 300)));
+        const { matrix, cards } = matrixFromGroups(Math.round(minX + 200), Math.round(maxY + 160), lines);
+        const placed = new Map(cards.map((c) => [c.id, c]));
+        // A group that went into the grid whole is now a product line: the line keeps its name, the frame goes
+        const groups = (p.groups || []).filter((g) => !g.children.every((id) => placed.has(id)));
+        // Bring the grid into view: its top-left corner near the top-left of the screen
+        const zoom = p.zoom || 1;
+        const pan = { x: Math.round(40 + MATRIX_LABEL_W * zoom - matrix.x * zoom), y: Math.round(70 + MATRIX_LABEL_H * zoom - matrix.y * zoom) };
+        return { ...p, groups, pan, matrices: [...(p.matrices || []), matrix], cards: (p.cards || []).map((c) => placed.get(c.id) || c) };
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [patchActive]
+  );
+  /** Photos let go over a grid snap into its cells */
+  const handleCardsDragEnd = useCallback(
+    (ids: string[]) => {
+      setTimeout(() => {
+        const p = latestProjectsRef.current.find((x) => x.id === activeProjectId);
+        if (!p?.matrices?.length) return;
+        let cards = p.cards || [];
+        let changed = false;
+        const matrices = p.matrices.map((m) => {
+          const moved = cards.filter((c) => ids.includes(c.id) && isOverMatrix(m, c)).map((c) => c.id);
+          if (moved.length === 0) return m;
+          changed = true;
+          const r = snapIntoMatrix(m, cards, moved);
+          cards = r.cards;
+          return r.matrix;
+        });
+        if (changed) patchActive((x) => ({ ...x, matrices, cards }));
+      }, 40);
+    },
+    [activeProjectId, patchActive]
+  );
+
+  const [catalogIncoming, setCatalogIncoming] = useState<{ key: number; items: { name: string; src: string }[] } | null>(null);
+  const handleCardsToCatalog = useCallback(
+    (cardIds: string[]) => {
+      const cards = readingOrder((activeProject.cards || []).filter((c) => cardIds.includes(c.id) && c.src));
+      if (cards.length === 0) return;
+      setCatalogIncoming({ key: Date.now(), items: cards.map((c) => ({ name: c.name || 'фото', src: c.src })) });
+      setStudioView('catalog');
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeProject, setStudioView]
+  );
+
   // Style Analysis Handlers (gemini-2.5-flash)
   const handleAnalyzeStyle = useCallback(async () => {
     const apiKey = getStoredApiKey();
@@ -2055,6 +2242,24 @@ export default function App() {
       } else {
         group();
       }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // ⌘A selects every photo on the board (only on the board, not while typing or inside a panel)
+  const selectAllRef = useRef({ view: studioView, cards: activeProject.cards });
+  selectAllRef.current = { view: studioView, cards: activeProject.cards };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'a' || e.shiftKey || e.altKey) return;
+      const t = e.target as HTMLElement;
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
+      if (t.closest && t.closest('#studio-dock, #catalog-studio, [role="dialog"]')) return;
+      const { view, cards } = selectAllRef.current;
+      if (view !== 'board' || !cards?.length) return;
+      e.preventDefault();
+      setSelectedCardIds(new Set(cards.map((c) => c.id)));
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -2230,47 +2435,60 @@ export default function App() {
       className="flex flex-col w-screen h-screen overflow-hidden bg-white text-[var(--fg)] font-sans relative"
     >
       {/* Storage Warning Banner (>80%) */}
-      {pendingFolder && (
-        <div className="fixed inset-0 z-[60] bg-black/40 ofst-fade flex items-center justify-center p-2" onClick={() => setPendingFolder(null)}>
-          <div className="w-full max-w-sm bg-white p-2" onClick={(e) => e.stopPropagation()}>
-            <div className="ofst-run">
-              <span>Что в этой папке?</span>
-              <span>
-                {pendingFolder.files.length} фото · папок {groupByFolder(pendingFolder.files).length}
-              </span>
-            </div>
-            <button
-              className="w-full text-left p-2 mt-1 hover:bg-[var(--fg)] hover:text-white group cursor-pointer"
-              onClick={() => {
-                const f = pendingFolder.files;
-                setPendingFolder(null);
-                handleImportFolderAsProducts(f);
-              }}
-            >
-              <div className="text-[clamp(20px,1.8vw,26px)] font-medium leading-tight tracking-[-.01em]">Продукты</div>
-              <div className="text-[12px] text-[var(--grey)] group-hover:text-white/70 leading-snug">
-                В позиции. Название = имя файла, категория = подпапка. Если позиция уже есть, фото добавится к ней.
+      {pendingFolder && (() => {
+        const groupsIn = groupByFolder(pendingFolder.files);
+        const productFolders = groupsIn.filter((g) => g.files.filter((f) => isGenericName(f.file.name)).length / g.files.length >= 0.6).length;
+        const looksLikeFolderPerProduct = productFolders > 0 && productFolders >= groupsIn.length * 0.6;
+        const choice = (title: string, note: string, onClick: () => void, first = false) => (
+          <button className={`w-full text-left p-2 ${first ? 'mt-1' : ''} hover:bg-[var(--fg)] hover:text-white group cursor-pointer`} onClick={onClick}>
+            <div className="text-[clamp(20px,1.8vw,26px)] font-medium leading-tight tracking-[-.01em]">{title}</div>
+            <div className="text-[12px] text-[var(--grey)] group-hover:text-white/70 leading-snug">{note}</div>
+          </button>
+        );
+        return (
+          <div className="fixed inset-0 z-[60] bg-black/40 ofst-fade flex items-center justify-center p-2" onClick={() => setPendingFolder(null)}>
+            <div className="w-full max-w-md bg-white p-2" onClick={(e) => e.stopPropagation()}>
+              <div className="ofst-run">
+                <span>Куда загрузить папку?</span>
+                <span>
+                  {pendingFolder.files.length} фото · папок {groupsIn.length}
+                </span>
               </div>
-            </button>
-            <button
-              className="w-full text-left p-2 hover:bg-[var(--fg)] hover:text-white group cursor-pointer"
-              onClick={() => {
+              <p className="text-[12px] leading-snug pt-1">
+                {looksLikeFolderPerProduct
+                  ? `Похоже, тут папка = один товар (${productFolders}): файлы названы номерами. Первое фото станет исходником, остальные — ракурсами в колонках.`
+                  : 'Похоже, тут файл = один товар: имя файла станет названием, подпапка — группой.'}
+              </p>
+              {choice(
+                'В позиции',
+                'Таблица товаров («Продукты»): из неё делается каталог и экспорт для сайта. Если такая позиция уже есть (по коду или названию), фото добавится к ней.',
+                () => {
+                  const f = pendingFolder.files;
+                  setPendingFolder(null);
+                  handleImportFolderAsProducts(f);
+                },
+                true
+              )}
+              {choice('На доску', 'Свободно разложить и посмотреть: каждая папка станет группой. Потом фото можно перетащить в позиции или выделить и нажать «в позиции».', () => {
                 const { files, pos } = pendingFolder;
                 setPendingFolder(null);
                 handleAddFolder(files, pos);
-              }}
-            >
-              <div className="text-[clamp(20px,1.8vw,26px)] font-medium leading-tight tracking-[-.01em]">Фото на доску</div>
-              <div className="text-[12px] text-[var(--grey)] group-hover:text-white/70 leading-snug">Референсы и всё остальное: каждая подпапка станет группой.</div>
-            </button>
-            <div className="flex justify-end">
-              <button className="ofst-cell ofst-cell--muted" onClick={() => setPendingFolder(null)}>
-                Отмена
-              </button>
+              })}
+              {choice('И туда, и туда', 'Позиции заполнятся, а на доске появятся те же фото группами — разбирать и сравнивать.', async () => {
+                const { files, pos } = pendingFolder;
+                setPendingFolder(null);
+                await handleImportFolderAsProducts(files);
+                handleAddFolder(files, pos);
+              })}
+              <div className="flex justify-end">
+                <button className="ofst-cell ofst-cell--muted" onClick={() => setPendingFolder(null)}>
+                  Отмена
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {isDeploymentCopy && (
         <div className="bg-[var(--marker)] text-[var(--fg)] text-[12px] px-2 py-1 z-40 flex items-center justify-between gap-2">
           <span>
@@ -2375,6 +2593,45 @@ export default function App() {
         />
 
         <div className="relative flex-1 min-w-0 flex">
+        {studioView === 'board' && selectedCardIds.size > 0 && (
+          <div
+            id="selection-bar"
+            className="absolute left-1/2 -translate-x-1/2 bottom-9 z-20 flex items-center bg-white text-[13px] ofst-pop shadow-[0_0_0_1px_var(--soft-2)]"
+          >
+            <span className="px-2 text-[var(--grey)] tabular-nums">выбрано {selectedCardIds.size}</span>
+            <button
+              className="ofst-cell"
+              title="Каждое фото станет отдельной позицией (товаром)"
+              onClick={() => handleCardsToPositions(Array.from(selectedCardIds), 'each')}
+            >
+              в позиции
+            </button>
+            {selectedCardIds.size > 1 && (
+              <button
+                className="ofst-cell"
+                title="Один товар: первое фото (слева сверху) — исходник, остальные — ракурсы"
+                onClick={() => handleCardsToPositions(Array.from(selectedCardIds), 'one')}
+              >
+                одним товаром
+              </button>
+            )}
+            <button className="ofst-cell" title="Открыть «Каталог» с этими фото как товарами" onClick={() => handleCardsToCatalog(Array.from(selectedCardIds))}>
+              в каталог
+            </button>
+            <button
+              className="ofst-cell"
+              title="Разложить по осям: каждая группа (или фото) — строка-товар, фото в ней — ракурсы по столбцам"
+              onClick={() => handleCardsToMatrix(Array.from(selectedCardIds))}
+            >
+              в оси
+            </button>
+            {selectedCardIds.size > 1 && (
+              <button className="ofst-cell ofst-cell--muted" title="Сгруппировать (⌘G)" onClick={handleGroupSelected}>
+                группа
+              </button>
+            )}
+          </div>
+        )}
         <Canvas
           project={activeProject}
           onAddFolder={askAboutFolder}
@@ -2415,6 +2672,14 @@ export default function App() {
           onSelectConnection={setSelectedConnectionId}
           onGroupSelected={handleGroupSelected}
           onUngroup={handleUngroup}
+          onRenameGroup={handleRenameGroup}
+          matrixApi={matrixApi}
+          onAddMatrix={handleAddMatrix}
+          onCardsDragEnd={handleCardsDragEnd}
+          onGroupToPosition={(groupId) => {
+            const g = (activeProject.groups || []).find((x) => x.id === groupId);
+            if (g) handleCardsToPositions(g.children, 'one', g.name);
+          }}
           onAnalyzeStyle={handleAnalyzeStyle}
           onUpdateSiteMockup={handleUpdateSiteMockup}
           onDeleteSiteMockup={handleDeleteSiteMockup}
@@ -2433,6 +2698,7 @@ export default function App() {
             masterPrompts={masterPrompts}
             onSaveMasterPrompts={handleSaveMasterPrompts}
             onOpenSettings={() => setIsSettingsOpen(true)}
+            incomingItems={catalogIncoming}
           />
         )}
         {studioView === 'video' && <VideoTab projectName={activeProject.name} />}

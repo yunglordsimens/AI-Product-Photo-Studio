@@ -260,7 +260,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   return (
     <header id="app-topbar" className="h-10 bg-white px-2 flex items-center justify-between gap-2 select-none z-30 shrink-0">
       {/* Studio name, project, count */}
-      <div className="flex items-baseline gap-3 min-w-0 overflow-hidden text-[13px]">
+      <div className="flex items-center self-stretch gap-3 min-w-0 overflow-hidden text-[13px]">
         {onToggleSidebar && (
           <button id="btn-toggle-sidebar" onClick={onToggleSidebar} className={`ofst-cell -ml-2 ${isSidebarCollapsed ? '' : 'md:hidden'}`} title="Показать проекты" aria-label="Проекты">
             Проекты
@@ -269,12 +269,14 @@ export const TopBar: React.FC<TopBarProps> = ({
         <span className="hidden sm:inline font-semibold tracking-[.02em] shrink-0">OFST Photo</span>
         {/* Tabs: the board, the catalog conveyor, video (to come) */}
         {onChangeView && (
-          <nav className="flex shrink-0 self-center" aria-label="Режим">
+          <nav className="flex shrink-0 self-stretch" aria-label="Режим" role="tablist">
             {VIEWS.map((v) => (
               <button
                 key={v.id}
                 onClick={() => onChangeView(v.id)}
-                className={`ofst-cell ${view === v.id ? 'is-on' : 'ofst-cell--muted'}`}
+                role="tab"
+                aria-selected={view === v.id}
+                className={`ofst-tab ${view === v.id ? 'is-on' : ''}`}
                 aria-current={view === v.id ? 'page' : undefined}
               >
                 {v.label}
@@ -286,7 +288,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           {projectName} · {cardCount} фото
           {selectedCount > 0 && <span className="ml-1 text-[var(--fg)]">· выбрано {selectedCount}</span>}
         </span>
-        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.14 · 21.10</span>
+        <span className="hidden xl:inline text-[11px] text-[var(--grey)] shrink-0">v1.15 · 22.10</span>
       </div>
 
       {/* Tools: text cells, reorderable by drag */}

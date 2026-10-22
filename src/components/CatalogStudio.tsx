@@ -42,6 +42,8 @@ interface CatalogStudioProps {
   masterPrompts?: MasterPrompt[];
   onSaveMasterPrompts?: (prompts: MasterPrompt[]) => void;
   onOpenSettings: () => void;
+  /** Photos sent from the board («в каталог»); a new `key` adds them once */
+  incomingItems?: { key: number; items: { name: string; src: string }[] } | null;
 }
 
 const CONCURRENCY = 2;
@@ -78,6 +80,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   selectedCards,
   boardCards = [],
   masterPrompts = [],
+  incomingItems,
   onSaveMasterPrompts,
   onOpenSettings,
 }) => {
@@ -104,6 +107,8 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
     setBeforeIdx(0);
   };
   const [showProductPicker, setShowProductPicker] = useState(false);
+  const [refMenuOpen, setRefMenuOpen] = useState(false);
+  const [itemsFromBoard, setItemsFromBoard] = useState(false);
 
   const stopRef = useRef(false);
   const refInputRef = useRef<HTMLInputElement>(null);
@@ -255,6 +260,25 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
         : { kind: 'info', text: `Добавлено ${added.length} фото.` }
     );
   };
+
+  const addItemsFromSrcs = async (picked: { name: string; src: string }[]) => {
+    const added: CatalogItem[] = [];
+    for (const it of picked) {
+      const src = await compressDataUrl(it.src, 1536, 1536, 0.9);
+      if (src.startsWith('data:image')) added.push({ id: newId('item'), name: it.name || 'фото', original: src, results: {} });
+    }
+    update((prev) => ({ ...prev, items: [...prev.items, ...added] }));
+    setNotice({ kind: 'info', text: `Добавлено ${added.length} фото.` });
+  };
+
+  // Photos sent from the board arrive once the catalog of this project is loaded
+  const handledIncoming = useRef<number | null>(null);
+  useEffect(() => {
+    if (!incomingItems || loadedFor !== projectId || handledIncoming.current === incomingItems.key) return;
+    handledIncoming.current = incomingItems.key;
+    addItemsFromSrcs(incomingItems.items);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingItems, loadedFor, projectId]);
 
   const addFromProducts = async (picked: ProductItem[]) => {
     const added: CatalogItem[] = [];
@@ -670,30 +694,23 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
               ))}
               {catalog.refs.length < 3 && (
                 <button
-                  onClick={() => refInputRef.current?.click()}
-                  className="aspect-square bg-[var(--soft)] hover:bg-[var(--soft-2)] text-[13px]"
+                  onClick={() => setRefMenuOpen((v) => !v)}
+                  className={`aspect-square text-[13px] ${refMenuOpen ? 'bg-[var(--fg)] text-white' : 'bg-[var(--soft)] hover:bg-[var(--soft-2)]'}`}
                 >
                   + эталон
                 </button>
               )}
             </div>
-            {catalog.refs.length < 3 && (
-              <div className="flex flex-wrap -ml-2 text-[12px]">
-                <button onClick={() => setRefPicker('board')} disabled={boardCards.length === 0} className="ofst-cell !h-7">
-                  с доски
-                </button>
-                <button onClick={() => setRefPicker('products')} disabled={!products.some((p) => p.photoDataUrl)} className="ofst-cell !h-7">
-                  из позиций
-                </button>
-                <button onClick={() => refInputRef.current?.click()} className="ofst-cell ofst-cell--muted !h-7">
-                  с компьютера
-                </button>
-                {selectedCards.length > 0 && (
-                  <button onClick={addReferencesFromCanvas} className="ofst-cell ofst-cell--muted !h-7">
-                    выделенные ({selectedCards.length})
-                  </button>
-                )}
-              </div>
+            {catalog.refs.length < 3 && refMenuOpen && (
+              <SourceList
+                onDone={() => setRefMenuOpen(false)}
+                options={[
+                  { label: 'с доски', note: `${boardCards.length} фото`, disabled: boardCards.length === 0, onClick: () => setRefPicker('board') },
+                  ...(selectedCards.length > 0 ? [{ label: `выделенные на доске (${selectedCards.length})`, onClick: addReferencesFromCanvas }] : []),
+                  { label: 'из позиций', note: `${products.filter((p) => p.photoDataUrl).length}`, disabled: !products.some((p) => p.photoDataUrl), onClick: () => setRefPicker('products') },
+                  { label: 'с компьютера', onClick: () => refInputRef.current?.click() },
+                ]}
+              />
             )}
 
             <div className="grid grid-cols-2 gap-0.5">
@@ -815,15 +832,19 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
           {/* Step 2 */}
           <section className="space-y-1">
             <StepTitle n={2} title="Фото товаров" hint={`${catalog.items.length} фото${selectedList.length > 0 ? ` · выбрано ${selectedList.length}` : ''}`} />
-            <div className="flex flex-wrap items-start">
-              <AddPhotosCell onFiles={() => filesInputRef.current?.click()} onFolder={() => folderInputRef.current?.click()} />
-              {products.length > 0 && (
-                <button onClick={() => setShowProductPicker(true)} className="ofst-cell">
-                  Из продуктов ({products.length})
-                </button>
-              )}
-            </div>
-            <p className="text-[12px] text-[var(--grey)]">Имя файла станет названием.</p>
+            <SourceMenu
+              label="+ фото товаров"
+              options={[
+                { label: 'с доски', note: `${boardCards.length} фото`, disabled: boardCards.length === 0, onClick: () => setItemsFromBoard(true) },
+                ...(selectedCards.length > 0
+                  ? [{ label: `выделенные на доске (${selectedCards.length})`, onClick: () => addItemsFromSrcs(selectedCards.map((c) => ({ name: c.name || 'фото', src: c.src }))) }]
+                  : []),
+                { label: 'из позиций', note: `${products.filter((p) => p.photoDataUrl).length}`, disabled: !products.some((p) => p.photoDataUrl), onClick: () => setShowProductPicker(true) },
+                { label: 'с компьютера: фото', onClick: () => filesInputRef.current?.click() },
+                { label: 'с компьютера: папка', onClick: () => folderInputRef.current?.click() },
+              ]}
+            />
+            <p className="text-[12px] text-[var(--grey)]">Название берётся из имени файла, позиции или подписи на доске. С доски можно и так: выдели фото → «в каталог».</p>
           </section>
 
           {/* Step 3 */}
@@ -1204,6 +1225,19 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
         />
       )}
 
+      {itemsFromBoard && (
+        <SrcPicker
+          title="Фото товаров с доски"
+          max={500}
+          items={boardCards.map((c) => ({ id: c.id, name: c.name || 'фото', src: c.src }))}
+          onCancel={() => setItemsFromBoard(false)}
+          onConfirm={(picked) => {
+            setItemsFromBoard(false);
+            addItemsFromSrcs(picked);
+          }}
+        />
+      )}
+
       {/* Product picker */}
       {showProductPicker && (
         <ProductPicker products={products} onCancel={() => setShowProductPicker(false)} onConfirm={addFromProducts} />
@@ -1263,23 +1297,39 @@ function StepTitle({ n, title, hint }: { n: number; title: string; hint: string 
 }
 
 /** One cell for photos and folders; the browser picker takes one or the other, so it opens a two-line choice */
-function AddPhotosCell({ onFiles, onFolder }: { onFiles: () => void; onFolder: () => void }) {
+type SourceOption = { label: string; note?: string; disabled?: boolean; onClick: () => void };
+
+/** A list of «where from» choices; picking one closes it */
+function SourceList({ options, onDone }: { options: SourceOption[]; onDone: () => void }) {
+  return (
+    <div className="flex flex-col items-stretch ofst-pop">
+      {options.map((o) => (
+        <button
+          key={o.label}
+          disabled={o.disabled}
+          onClick={() => {
+            onDone();
+            o.onClick();
+          }}
+          className="ofst-cell justify-between !h-7 text-left"
+        >
+          <span>{o.label}</span>
+          {o.note && <span className="text-[var(--grey)] tabular-nums">{o.note}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** One button that asks where the photos come from: board, positions or the computer */
+function SourceMenu({ label, options }: { label: string; options: SourceOption[] }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="inline-flex flex-col items-stretch">
-      <button onClick={() => setOpen((v) => !v)} className="ofst-cell ofst-cell--primary">
-        Фото / папка
+    <div className="flex flex-col items-stretch max-w-[260px]">
+      <button onClick={() => setOpen((v) => !v)} className={`ofst-cell ofst-cell--primary justify-start ${open ? 'is-on' : ''}`}>
+        {label}
       </button>
-      {open && (
-        <>
-          <button onClick={() => { setOpen(false); onFiles(); }} className="ofst-cell justify-start">
-            Фото
-          </button>
-          <button onClick={() => { setOpen(false); onFolder(); }} className="ofst-cell justify-start">
-            Папка
-          </button>
-        </>
-      )}
+      {open && <SourceList options={options} onDone={() => setOpen(false)} />}
     </div>
   );
 }

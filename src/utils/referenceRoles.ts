@@ -1,5 +1,7 @@
 /** What a reference photo is good for. Marked on the board, sent to the model with the photo. */
 export const REFERENCE_ROLES: { id: string; label: string; prompt: string }[] = [
+  // «товар»: this photo IS the product — keep it exactly, take nothing else from it unless also marked
+  { id: 'product', label: 'товар', prompt: '' },
   { id: 'bg', label: 'фон', prompt: 'фон и поверхность' },
   { id: 'bgcolor', label: 'цвет фона', prompt: 'цвет фона' },
   { id: 'light', label: 'свет', prompt: 'схему света и тени' },
@@ -9,6 +11,8 @@ export const REFERENCE_ROLES: { id: string; label: string; prompt: string }[] = 
   { id: 'material', label: 'материал', prompt: 'материалы и фактуры окружения' },
   { id: 'mood', label: 'настроение', prompt: 'общее настроение и цветокоррекцию' },
 ];
+
+export const isProductPhoto = (ids: string[] | undefined) => Boolean(ids?.includes('product'));
 
 export function rolesPrompt(ids: string[] | undefined): string {
   return (ids || [])

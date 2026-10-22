@@ -63,6 +63,8 @@ export interface ProductItem {
   name: string;
   photoDataUrl: string;
   category?: string; // e.g. the subfolder it came from ("Káva", "Poke Bowls")
+  sku?: string; // shop id / code, e.g. from a folder "785756834 - Name" or the id column of a CSV
+  price?: string;
   variants?: (string | null)[]; // new photos for this position, one per column (data URLs)
   finalIndex?: number; // which photo is the final one: -1 = original, 0.. = variant column
 }
@@ -89,6 +91,24 @@ export interface SiteMockup {
   opacity: number; // 0.1 - 1.0, default 0.5
 }
 
+/**
+ * «Оси»: a grid on the board. Photos dropped into it snap to cells.
+ * One axis is the products, the other is angles / variants; ⇄ swaps them on screen.
+ */
+export interface BoardMatrix {
+  id: string;
+  name?: string;
+  /** Top-left corner of the first cell (labels sit outside: rows on the left, columns on top) */
+  x: number;
+  y: number;
+  cellW: number;
+  cellH: number;
+  rows: string[];
+  cols: string[];
+  /** Which axis lists the products */
+  productsAlong: 'rows' | 'cols';
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -98,6 +118,8 @@ export interface Project {
   groups?: CardGroup[];
   products?: ProductItem[];
   siteMockup?: SiteMockup;
+  /** Axis grids on the board: one line per product, one cross line per angle / variant */
+  matrices?: BoardMatrix[];
   createdAt: number;
   updatedAt: number;
   pan: { x: number; y: number };
