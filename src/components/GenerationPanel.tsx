@@ -1,3 +1,4 @@
+import { PromptExampleView } from './PromptExampleView';
 import React, { useState, useRef, useEffect } from 'react';
 import { Card, MasterPrompt, Note, ProductItem } from '../types';
 import { groupPrompts } from '../utils/promptCategories';
@@ -98,6 +99,9 @@ export function GenerationPanel({
   useEffect(() => {
     if (currentPromptPreset !== undefined && currentPromptPreset !== '') {
       setPrompt(currentPromptPreset);
+      // «Применить» in the library: remember which prompt it was, so its name and example follow the result
+      const mp = masterPrompts.find((p) => p.prompt === currentPromptPreset);
+      setSelectedMasterPromptId(mp ? mp.id : '');
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
         textareaRef.current.style.height = `${Math.min(140, Math.max(60, textareaRef.current.scrollHeight))}px`;
@@ -357,6 +361,18 @@ export function GenerationPanel({
           </optgroup>
         ))}
       </select>
+      {(() => {
+        const mp = masterPrompts.find((p) => p.id === selectedMasterPromptId);
+        if (!mp) return null;
+        return (
+          <div className="flex items-center gap-2 pt-1 text-[11px] text-[var(--grey)]">
+            <PromptExampleView example={mp.example} />
+            <span className="leading-snug">
+              {mp.example ? 'пример: до | после' : 'примера пока нет — первый результат с этим промптом станет примером'}
+            </span>
+          </div>
+        );
+      })()}
     </div>
   );
 

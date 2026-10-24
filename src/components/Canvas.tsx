@@ -50,6 +50,9 @@ interface CanvasProps {
   onGroupSelected?: () => void;
   onUngroup?: (groupId: string) => void;
   onRenameGroup?: (groupId: string, name: string) => void;
+  /** A photo made with a master prompt can become that prompt's example */
+  onMakeExample?: (card: Card) => void;
+  examplePromptNames?: Set<string>;
   /** The group becomes one position: first photo = original, the rest = angles */
   onGroupToPosition?: (groupId: string) => void;
   /** «Оси» grids on the board */
@@ -104,6 +107,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   onGroupSelected,
   onUngroup,
   onRenameGroup,
+  onMakeExample,
+  examplePromptNames,
   onGroupToPosition,
   matrixApi,
   onAddMatrix,
@@ -1697,6 +1702,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             card={card}
             isSelected={selectedCardIds.has(card.id)}
             isSoleSelected={selectedCardIds.size === 1 && selectedCardIds.has(card.id)}
+            onMakeExample={onMakeExample && card.meta?.masterPromptName && examplePromptNames?.has(card.meta.masterPromptName) ? onMakeExample : undefined}
             dimmed={Boolean(focusGroupId) && !focusIds.has(card.id)}
             isConnectingSource={connectingSourceCardId === card.id}
             isConnectionMode={isConnectionMode}

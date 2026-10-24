@@ -69,7 +69,7 @@ interface TopBarProps {
   onLogoClick?: () => void;
 }
 
-const APP_VERSION = 'v1.16 · 22.10';
+const APP_VERSION = 'v1.17 · 24.10';
 const LANGS = [
   { id: 'ru', label: 'RU', name: 'Русский' },
   { id: 'en', label: 'EN', name: 'English' },

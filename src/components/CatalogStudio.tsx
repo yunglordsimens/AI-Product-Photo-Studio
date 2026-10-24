@@ -29,6 +29,7 @@ import { fileSafe } from '../utils/positionsExport';
 import { isImageFile, normalizeImageFiles } from '../utils/heic';
 import { SOURCE_FIX_MARKER } from '../utils/storage';
 import { renderBeforeAfter } from '../utils/beforeAfter';
+import { makeExample, withExample } from '../utils/promptExamples';
 import { Info } from './Info';
 
 interface CatalogStudioProps {
@@ -553,7 +554,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   );
 
   /** Edit the take being shown by words; the result goes on top of the «после» stack */
-  const editTake = async (itemId: string, idx: number, instruction: string) => {
+  const editTake = async (itemId: string, idx: number, instruction: string, promptId?: string) => {
     const text = instruction.trim();
     const it = catalog.items.find((i) => i.id === itemId);
     const src = it ? afterStack(it)[idx] : undefined;
@@ -567,6 +568,12 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
       pushTake(itemId, activeVersion.id, out);
       setAfterIdx(0);
       setEditText('');
+      // A quick action that has no example yet gets this one
+      const mp = promptId ? masterPrompts.find((p) => p.id === promptId) : undefined;
+      if (mp && !mp.example && onSaveMasterPrompts) {
+        const ex = await makeExample(src, out, 'auto');
+        onSaveMasterPrompts(withExample(masterPrompts, mp.id, ex));
+      }
     } catch (err) {
       setNotice({ kind: 'error', text: `Правка не вышла: ${err instanceof Error ? err.message : String(err)}` });
     } finally {
@@ -1173,7 +1180,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                   <button
                     key={q.id}
                     type="button"
-                    onClick={() => editTake(compareItem.id, aIdx, q.prompt)}
+                    onClick={() => editTake(compareItem.id, aIdx, q.prompt, q.id)}
                     disabled={!!editingItemId}
                     className="ofst-cell ofst-cell--muted !h-7"
                     title={q.prompt.replace(SOURCE_FIX_MARKER, '').trim()}

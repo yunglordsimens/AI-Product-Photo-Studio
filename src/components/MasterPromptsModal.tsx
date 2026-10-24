@@ -1,5 +1,9 @@
-import React, { useState } from 'react';
-import { MasterPrompt } from '../types';
+import React, { useRef, useState } from 'react';
+import { Card, MasterPrompt } from '../types';
+import { PromptExampleView } from './PromptExampleView';
+import { Info } from './Info';
+import { makeExample, withExample } from '../utils/promptExamples';
+import { isImageFile, normalizeImageFiles } from '../utils/heic';
 import { FloatingWindow } from './FloatingWindow';
 import { PROMPT_CATEGORIES, groupPrompts, promptCategory } from '../utils/promptCategories';
 
@@ -11,7 +15,20 @@ interface MasterPromptsModalProps {
   onSelectPromptForGen?: (promptText: string) => void;
   projectId?: string;
   projectName?: string;
+  /** Photos selected on the board: they can become the prompt's example */
+  selectedCards?: Card[];
+  /** Run the prompt on the selected photo; the result becomes its example */
+  onTryPrompt?: (prompt: MasterPrompt) => void;
+  isGenerating?: boolean;
 }
+
+const readAsDataUrl = (f: File) =>
+  new Promise<string>((resolve) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => resolve('');
+    r.readAsDataURL(f);
+  });
 
 export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
   isOpen,
@@ -21,7 +38,21 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
   onSelectPromptForGen,
   projectId,
   projectName,
+  selectedCards = [],
+  onTryPrompt,
+  isGenerating = false,
 }) => {
+  const [view, setView] = useState<'list' | 'gallery'>(() => {
+    try {
+      return localStorage.getItem('aips_prompts_view') === 'gallery' ? 'gallery' : 'list';
+    } catch {
+      return 'list';
+    }
+  });
+  const [exampleFor, setExampleFor] = useState<string | null>(null);
+  const [exampleNote, setExampleNote] = useState<string | null>(null);
+  const exampleFileRef = useRef<HTMLInputElement>(null);
+  const exampleTarget = useRef<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingPrompt, setEditingPrompt] = useState<MasterPrompt | null>(null);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
@@ -37,6 +68,123 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   if (!isOpen) return null;
+
+  const changeView = (v: 'list' | 'gallery') => {
+    setView(v);
+    try {
+      localStorage.setItem('aips_prompts_view', v);
+    } catch {
+      /* private mode */
+    }
+  };
+
+  const setExample = async (id: string, before: string | undefined, after: string) => {
+    const ex = await makeExample(before, after, 'manual');
+    onSaveMasterPrompts(withExample(masterPrompts, id, ex));
+    setExampleFor(null);
+    setExampleNote(null);
+  };
+
+  const exampleFromSelection = (id: string) => {
+    if (selectedCards.length === 0 || selectedCards.length > 2) {
+      setExampleNote('Выдели на доске 1 фото (только «после») или 2: сначала «до», потом «после».');
+      return;
+    }
+    if (selectedCards.length === 1) setExample(id, undefined, selectedCards[0].src);
+    else setExample(id, selectedCards[0].src, selectedCards[1].src);
+  };
+
+  const onExampleFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const id = exampleTarget.current;
+    const files = (await normalizeImageFiles(Array.from(e.target.files || []).filter(isImageFile))).sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true })
+    );
+    e.target.value = '';
+    if (!id || files.length === 0) return;
+    const urls = await Promise.all(files.slice(0, 2).map(readAsDataUrl));
+    if (urls.length === 1) setExample(id, undefined, urls[0]);
+    else setExample(id, urls[0], urls[1]);
+  };
+
+  /** Actions to give a prompt its example */
+  const exampleActions = (item: MasterPrompt) =>
+    exampleFor === item.id && (
+      <div className="col-span-full bg-white p-1 text-[12px] ofst-pop" onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-wrap">
+          <button
+            onClick={() => exampleFromSelection(item.id)}
+            className="ofst-cell !h-6 !text-[12px]"
+            title="1 фото — только «после»; 2 фото — сначала «до», потом «после»"
+          >
+            из выделенных на доске{selectedCards.length ? ` (${selectedCards.length})` : ''}
+          </button>
+          {onTryPrompt && (
+            <button
+              onClick={() => {
+                if (selectedCards.length === 0) {
+                  setExampleNote('Выдели на доске фото, на котором попробовать этот промпт.');
+                  return;
+                }
+                onTryPrompt(item);
+                setExampleFor(null);
+                setExampleNote(null);
+              }}
+              disabled={isGenerating}
+              className="ofst-cell !h-6 !text-[12px]"
+              title="Сгенерировать с этим промптом из выделенного фото; результат ляжет на доску и станет примером"
+            >
+              попробовать на выделенном
+            </button>
+          )}
+          <button
+            onClick={() => {
+              exampleTarget.current = item.id;
+              exampleFileRef.current?.click();
+            }}
+            className="ofst-cell !h-6 !text-[12px]"
+            title="1 файл — «после»; 2 файла — «до» и «после» (по алфавиту)"
+          >
+            с компьютера
+          </button>
+          {item.example && (
+            <button onClick={() => onSaveMasterPrompts(withExample(masterPrompts, item.id, undefined))} className="ofst-cell ofst-cell--muted !h-6 !text-[12px]">
+              убрать пример
+            </button>
+          )}
+          <button onClick={() => setExampleFor(null)} className="ofst-cell ofst-cell--muted !h-6 !text-[12px]">
+            отмена
+          </button>
+        </div>
+        {exampleNote && <p className="px-2 pt-0.5 text-[var(--grey)]">{exampleNote}</p>}
+      </div>
+    );
+
+  const exampleButton = (item: MasterPrompt) => (
+    <button
+      onClick={() => {
+        setExampleFor(exampleFor === item.id ? null : item.id);
+        setExampleNote(null);
+      }}
+      className={`ofst-cell !h-6 !text-[12px] ${exampleFor === item.id ? 'is-on' : 'ofst-cell--muted'}`}
+      title="Задать картинку-пример: до и после"
+    >
+      пример
+    </button>
+  );
+
+  const applyButton = (item: MasterPrompt) =>
+    onSelectPromptForGen && (
+      <button
+        onClick={() => {
+          onSelectPromptForGen(item.prompt);
+          onClose();
+        }}
+        className="ofst-cell ofst-cell--primary !h-6 !text-[12px]"
+        title="Вставить в форму генерации"
+      >
+        Применить
+      </button>
+    );
 
   const handleStartCreate = () => {
     setEditingPrompt(null);
@@ -167,7 +315,7 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
 
         {/* Shelves */}
         {!isCreatingNew && !editingPrompt && (
-          <div className="flex flex-wrap shrink-0 -mx-0.5">
+          <div className="flex flex-wrap items-center shrink-0 -mx-0.5">
             {['Все', ...shelves.map((g) => g.title)].map((t) => (
               <button key={t} onClick={() => setShelf(t)} className={`ofst-cell !h-7 ${shelf === t ? 'is-on' : 'ofst-cell--muted'}`}>
                 {t}
@@ -176,6 +324,20 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
                 </span>
               </button>
             ))}
+            <span className="flex-1" />
+            <span className="flex items-center gap-1 pr-0.5">
+              <Info>
+                У каждого промпта может быть пример «до | после». Он появляется сам после первой генерации с этим промптом, или его можно задать:
+                «пример» → из выделенных на доске, «попробовать на выделенном» или с компьютера. В режиме «примеры» наведи на картинку, чтобы
+                увидеть «до».
+              </Info>
+              <button onClick={() => changeView('list')} className={`ofst-cell !h-7 ${view === 'list' ? 'is-on' : 'ofst-cell--muted'}`}>
+                список
+              </button>
+              <button onClick={() => changeView('gallery')} className={`ofst-cell !h-7 ${view === 'gallery' ? 'is-on' : 'ofst-cell--muted'}`}>
+                примеры
+              </button>
+            </span>
           </div>
         )}
 
@@ -262,10 +424,27 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
                       <span>{g.items.length}</span>
                     </div>
                   )}
+                  {view === 'gallery' ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-1 gap-y-3">
+                      {g.items.map((item) => (
+                        <div key={item.id} className="min-w-0 flex flex-col">
+                          <PromptExampleView example={item.example} size="large" />
+                          <h4 className="text-[13px] font-medium leading-tight pt-1">{item.name}</h4>
+                          <p className="text-[11px] text-[var(--grey)] leading-snug line-clamp-2 select-text">{item.prompt}</p>
+                          <div className="flex flex-wrap pt-0.5 -ml-2">
+                            {applyButton(item)}
+                            {exampleButton(item)}
+                          </div>
+                          {exampleActions(item)}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
                   <ol>
                     {g.items.map((item, idx) => (
-                    <li key={item.id} className="group grid grid-cols-[28px_minmax(0,1fr)_auto] gap-x-2 py-1.5 hover:bg-[var(--soft)]">
+                    <li key={item.id} className="group grid grid-cols-[28px_84px_minmax(0,1fr)_auto] gap-x-2 py-1.5 hover:bg-[var(--soft)]">
                       <span className="text-[12px] tabular-nums text-[var(--grey)] pl-1 pt-px">{String(idx + 1).padStart(2, '0')}</span>
+                      <PromptExampleView example={item.example} />
                       <div className="min-w-0">
                         <h4 className="text-[13px] font-medium leading-tight">{item.name}</h4>
                         <p className="text-[12px] text-[var(--grey)] leading-snug line-clamp-2 select-text">{item.prompt}</p>
@@ -274,18 +453,8 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
                         )}
                       </div>
                       <div className="flex items-start text-[12px]">
-                        {onSelectPromptForGen && (
-                          <button
-                            onClick={() => {
-                              onSelectPromptForGen(item.prompt);
-                              onClose();
-                            }}
-                            className="ofst-cell ofst-cell--primary !h-6 !text-[12px]"
-                            title="Вставить в форму генерации"
-                          >
-                            Применить
-                          </button>
-                        )}
+                        {applyButton(item)}
+                        {exampleButton(item)}
                         <button onClick={() => handleCopyText(item)} className="ofst-cell ofst-cell--muted !h-6 !text-[12px]" title="Скопировать текст">
                           {copiedId === item.id ? 'скопировано' : 'копия'}
                         </button>
@@ -296,14 +465,17 @@ export const MasterPromptsModal: React.FC<MasterPromptsModalProps> = ({
                           удалить
                         </button>
                       </div>
+                      {exampleActions(item)}
                     </li>
                   ))}
                   </ol>
+                  )}
                 </section>
               ))}
             </div>
           )}
         </div>
+        <input ref={exampleFileRef} type="file" accept="image/*,.heic,.heif" multiple className="hidden" onChange={onExampleFiles} />
     </FloatingWindow>
   );
 };

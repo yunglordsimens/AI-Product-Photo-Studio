@@ -7,6 +7,8 @@ interface CardItemProps {
   isSelected: boolean;
   /** The only selected photo: its actions stay visible (on touch there is no hover) */
   isSoleSelected?: boolean;
+  /** Set for a photo made with a master prompt: makes it that prompt's example */
+  onMakeExample?: (card: Card) => void;
   /** Faded back while another group is in focus */
   dimmed?: boolean;
   isConnectingSource?: boolean;
@@ -40,6 +42,7 @@ export const CardItem: React.FC<CardItemProps> = memo(
     card,
     isSelected,
     isSoleSelected = false,
+    onMakeExample,
     dimmed = false,
     isConnectingSource = false,
     isConnectionMode = false,
@@ -94,7 +97,7 @@ export const CardItem: React.FC<CardItemProps> = memo(
         {/* Actions: text above the photo, on hover or when selected (touch) */}
         {!isConnectionMode && (
           <div
-            className={`absolute bottom-full right-0 flex bg-white text-[11px] z-20 ${
+            className={`absolute bottom-full right-0 flex bg-white text-[11px] z-20 whitespace-nowrap ${
               isSoleSelected ? 'flex' : 'hidden group-hover:flex'
             }`}
             {...stop}
@@ -109,6 +112,18 @@ export const CardItem: React.FC<CardItemProps> = memo(
                 title="Поправить это фото словами или готовым действием"
               >
                 править
+              </button>
+            )}
+            {onMakeExample && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMakeExample(card);
+                }}
+                className="px-1.5 h-5 hover:bg-[var(--soft)]"
+                title={`Сделать примером мастер-промпта «${card.meta?.masterPromptName}»`}
+              >
+                в пример
               </button>
             )}
             <button onClick={(e) => { e.stopPropagation(); onPreview(card); }} className="px-1.5 h-5 hover:bg-[var(--soft)]" title="Просмотр">

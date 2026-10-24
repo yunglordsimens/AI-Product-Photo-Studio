@@ -38,6 +38,7 @@ import { getStoredApiKey, hasGenerationAccess, generateImageWithGemini, analyzeS
 import { SOURCE_FIX_MARKER } from './utils/storage';
 import { isImageFile, normalizeImageFiles } from './utils/heic';
 import { FolderFile, groupByFolder, folderFilesFromInput, snapshotFolderFiles } from './utils/folderImport';
+import { makeExample, promptByName, withExample } from './utils/promptExamples';
 import { ensureVariantCols, folderImportNote, importFolderToPositions, isGenericName, splitSku } from './utils/positionsImport';
 import { MATRIX_LABEL_H, MATRIX_LABEL_W, addLine, isOverMatrix, matrixFromGroups, matrixToPositionDrafts, membersOf, newMatrix, removeLine, snapIntoMatrix, transposeMatrix } from './utils/matrix';
 import type { MatrixApi } from './components/BoardMatrixView';
@@ -306,7 +307,10 @@ export default function App() {
   }, []);
 
   // Save Master Prompts
+  const masterPromptsRef = useRef<MasterPrompt[]>([]);
+  masterPromptsRef.current = masterPrompts;
   const handleSaveMasterPrompts = useCallback((prompts: MasterPrompt[]) => {
+    masterPromptsRef.current = prompts;
     setMasterPrompts(prompts);
     saveMasterPrompts(prompts);
   }, []);
@@ -1452,6 +1456,8 @@ export default function App() {
       photoRole?: 'product' | 'style';
       /** Generate from these photos instead of the board selection (e.g. «править» on one photo) */
       sourceCards?: Card[];
+      /** «попробовать на выделенном»: the result becomes this prompt's example */
+      exampleForPromptId?: string;
     }
   ) => {
     const apiKey = getStoredApiKey();
@@ -1548,6 +1554,15 @@ export default function App() {
       setSelectedCardIds(new Set([generatedCard.id]));
       setSelectedNoteIds(new Set());
       setGenerationError(null);
+      // The first result of a master prompt becomes its example (or this one, when asked for)
+      const target = options?.exampleForPromptId
+        ? masterPromptsRef.current.find((mp) => mp.id === options.exampleForPromptId)
+        : promptByName(masterPromptsRef.current, options?.masterPromptName);
+      if (target && (options?.exampleForPromptId || !target.example)) {
+        makeExample(selectedCards[0]?.src, compressedDataUrl, options?.exampleForPromptId ? 'manual' : 'auto').then((ex) =>
+          handleSaveMasterPrompts(withExample(masterPromptsRef.current, target.id, ex))
+        );
+      }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       setGenerationError(errorMsg);
@@ -1555,6 +1570,21 @@ export default function App() {
       setIsGenerating(false);
     }
   };
+
+  /** A generated photo on the board → the example of the master prompt it was made with */
+  const handleMakeExampleFromCard = useCallback(
+    async (card: Card) => {
+      const mp = promptByName(masterPromptsRef.current, card.meta?.masterPromptName);
+      if (!mp) return;
+      const source = (activeProject.cards || []).find((c) => c.id === card.meta?.sourceIds?.[0]);
+      const ex = await makeExample(source?.src, card.src, 'manual');
+      handleSaveMasterPrompts(withExample(masterPromptsRef.current, mp.id, ex));
+      setFolderImportStatus(`Пример для «${mp.name}» обновлён.`);
+      setTimeout(() => setFolderImportStatus(null), 4000);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeProject.cards]
+  );
 
   // Handle Batch Generation for multiple products from the library
   const handleTriggerBatchGeneration = async (
@@ -2237,6 +2267,8 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeProject.cards, projects, activeProjectId]
   );
+  /** Names of master prompts: a photo made with one of them can become its example */
+  const examplePromptNames = useMemo(() => new Set(masterPrompts.map((mp) => mp.name)), [masterPrompts]);
   const quickEditPrompts = useMemo(() => masterPrompts.filter((mp) => mp.prompt.includes(SOURCE_FIX_MARKER)), [masterPrompts]);
 
   // The selection is exactly one existing group → the top-bar cell ungroups it
@@ -2702,6 +2734,8 @@ export default function App() {
           onGroupSelected={handleGroupSelected}
           onUngroup={handleUngroup}
           onRenameGroup={handleRenameGroup}
+          onMakeExample={handleMakeExampleFromCard}
+          examplePromptNames={examplePromptNames}
           matrixApi={matrixApi}
           onAddMatrix={handleAddMatrix}
           onCardsDragEnd={handleCardsDragEnd}
@@ -2877,6 +2911,9 @@ export default function App() {
           setIsGenerationOpen(true);
           setIsMasterPromptsOpen(false);
         }}
+        selectedCards={selectedCardsList}
+        isGenerating={isGenerating}
+        onTryPrompt={(mp) => handleTriggerGeminiGeneration(mp.prompt, { masterPromptName: mp.name, exampleForPromptId: mp.id })}
       />
 
       <StyleAnalysisModal

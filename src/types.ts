@@ -78,7 +78,17 @@ export interface MasterPrompt {
   category?: string;
   /** Set when the prompt belongs to one project only */
   projectId?: string;
+  /** A small «до / после» showing what the prompt does */
+  example?: PromptExample;
   createdAt: number;
+}
+
+export interface PromptExample {
+  before?: string;
+  after: string;
+  /** 'auto': the first result made with this prompt; 'manual': picked by hand */
+  source: 'auto' | 'manual';
+  updatedAt: number;
 }
 
 export interface SiteMockup {
