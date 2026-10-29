@@ -67,9 +67,11 @@ interface TopBarProps {
   onChangeView?: (view: StudioView) => void;
   /** The logo folds every side panel and window (the projects column stays) */
   onLogoClick?: () => void;
+  /** A catalog run going on in the background */
+  catalogProgress?: { done: number; total: number } | null;
 }
 
-const APP_VERSION = 'v1.17 · 24.10';
+const APP_VERSION = 'v1.18 · 29.10';
 const LANGS = [
   { id: 'ru', label: 'RU', name: 'Русский' },
   { id: 'en', label: 'EN', name: 'English' },
@@ -111,6 +113,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   view = 'board',
   onChangeView,
   onLogoClick,
+  catalogProgress,
   onAddImage,
   onAddFolder,
   onClearAll,
@@ -335,6 +338,11 @@ export const TopBar: React.FC<TopBarProps> = ({
                 aria-current={view === v.id ? 'page' : undefined}
               >
                 {v.label}
+                {v.id === 'catalog' && catalogProgress && (
+                  <span className="ml-1 text-[11px] tabular-nums opacity-70" title="Каталог прогоняется">
+                    {catalogProgress.done}/{catalogProgress.total}
+                  </span>
+                )}
               </button>
             ))}
           </nav>

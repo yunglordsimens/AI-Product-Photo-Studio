@@ -7,6 +7,7 @@ import { ZoomControls } from './ZoomControls';
 import { isImageFile } from '../utils/heic';
 import { FolderFile, collectFolderFiles, folderEntriesFromDrop } from '../utils/folderImport';
 import { PRODUCT_DRAG_TYPE } from '../utils/dragTypes';
+import { SLOT_DRAG_TYPE } from '../utils/positions';
 
 interface CanvasProps {
   project: Project;
@@ -25,6 +26,8 @@ interface CanvasProps {
   onAddImages: (files: File[], atCanvasPos?: { x: number; y: number }) => void;
   onAddFolder?: (files: FolderFile[], atCanvasPos?: { x: number; y: number }) => void;
   onDropProducts?: (productIds: string[], atCanvasPos: { x: number; y: number }) => void;
+  /** One photo dragged out of a position cell */
+  onDropSlot?: (ref: { id: string; slot: number }, atCanvasPos: { x: number; y: number }) => void;
   /** Board photos dropped on a position row (slot -1 = original, 0.. = variant column, undefined = first free) */
   onDropCardsOnPosition?: (cardIds: string[], positionId: string, slot?: number) => void;
   onChangeCardTakes?: (cardId: string, takes: string[]) => void;
@@ -53,6 +56,7 @@ interface CanvasProps {
   /** A photo made with a master prompt can become that prompt's example */
   onMakeExample?: (card: Card) => void;
   examplePromptNames?: Set<string>;
+  onCutCard?: (card: Card) => void;
   /** The group becomes one position: first photo = original, the rest = angles */
   onGroupToPosition?: (groupId: string) => void;
   /** «Оси» grids on the board */
@@ -83,6 +87,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onAddImages,
   onAddFolder,
   onDropProducts,
+  onDropSlot,
   onDropCardsOnPosition,
   onChangeCardTakes,
   onEditCard,
@@ -109,6 +114,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onRenameGroup,
   onMakeExample,
   examplePromptNames,
+  onCutCard,
   onGroupToPosition,
   matrixApi,
   onAddMatrix,
@@ -1301,7 +1307,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   // Only real files or products from the library count as drops (not toolbar buttons being reordered)
   const isAcceptedDrag = (e: React.DragEvent) => {
     const types = Array.from(e.dataTransfer?.types || []);
-    return types.includes('Files') || types.includes(PRODUCT_DRAG_TYPE);
+    return types.includes('Files') || types.includes(PRODUCT_DRAG_TYPE) || types.includes(SLOT_DRAG_TYPE);
   };
   const handleDragOver = (e: React.DragEvent) => {
     if (!isAcceptedDrag(e)) return;
@@ -1322,6 +1328,16 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (productIds && onDropProducts) {
       try {
         onDropProducts(JSON.parse(productIds), screenToCanvas(e.clientX, e.clientY));
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    // One photo from a position cell
+    const slotRef = e.dataTransfer.getData(SLOT_DRAG_TYPE);
+    if (slotRef && onDropSlot) {
+      try {
+        onDropSlot(JSON.parse(slotRef), screenToCanvas(e.clientX, e.clientY));
       } catch {
         /* ignore */
       }
@@ -1703,6 +1719,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             isSelected={selectedCardIds.has(card.id)}
             isSoleSelected={selectedCardIds.size === 1 && selectedCardIds.has(card.id)}
             onMakeExample={onMakeExample && card.meta?.masterPromptName && examplePromptNames?.has(card.meta.masterPromptName) ? onMakeExample : undefined}
+            onCut={onCutCard}
             dimmed={Boolean(focusGroupId) && !focusIds.has(card.id)}
             isConnectingSource={connectingSourceCardId === card.id}
             isConnectionMode={isConnectionMode}

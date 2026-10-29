@@ -127,7 +127,7 @@ export const BoardMatrixView: React.FC<{ matrix: BoardMatrix; cards: Card[]; zoo
       {/* Bar above: name, what the axes mean, actions */}
       <div className="absolute left-0 -top-7 h-6 flex items-center gap-2 text-[12px] whitespace-nowrap pointer-events-auto" {...stop}>
         <span onMouseDown={startDrag} className="px-1 h-5 inline-flex items-center bg-[var(--fg)] text-white cursor-grab active:cursor-grabbing" title="Перетащить сетку вместе с фото">
-          ⠿ Оси
+          ⠿ {m.linked ? 'Оси · позиции' : m.name || 'Оси'}
         </span>
         <Info>
           Оси — сетка, чтобы разобрать фото: одна линия — один товар, поперёк — его ракурсы или варианты. Перетащи фото в клетку, оно встанет
@@ -149,9 +149,13 @@ export const BoardMatrixView: React.FC<{ matrix: BoardMatrix; cards: Card[]; zoo
           onClick={() => api.toPositions(m.id)}
           disabled={filled === 0}
           className="px-1 bg-[var(--fg)] text-white hover:bg-[var(--marker)] hover:text-[var(--fg)] disabled:opacity-40"
-          title="Каждый товар станет позицией: фото по ракурсам лягут в колонки"
+          title={
+            m.linked
+              ? 'Обновить позиции по этой сетке: порядок фото, ракурсы, названия. Новые строки станут новыми позициями'
+              : 'Каждый товар станет позицией: фото по ракурсам лягут в колонки'
+          }
         >
-          → в позиции
+          {m.linked ? '→ обновить позиции' : '→ в позиции'}
         </button>
         <button
           onClick={() => {

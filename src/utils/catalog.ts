@@ -26,6 +26,10 @@ export interface CatalogResult {
   approved?: boolean;
   /** Earlier takes for this item in this version, newest first (src is the current / chosen one) */
   history?: string[];
+  /** Take numbers for [src, ...history]: «1.3» = version 1, take 3. Kept when takes are reordered or deleted */
+  nums?: number[];
+  /** How many takes were ever made here (the next one gets seq + 1) */
+  seq?: number;
   updatedAt: number;
 }
 
@@ -33,8 +37,14 @@ export interface CatalogItem {
   id: string;
   name: string;
   original: string; // data URL (compressed)
-  /** Earlier sources, newest first: a result moved into «до» pushes the old source here */
+  /** Earlier sources, newest first: a result moved into «до» pushes the old source here. The very first photo stays last. */
   originalHistory?: string[];
+  /** Labels for [original, ...originalHistory]: «оригинал» for the client's photo, a take number («1.2») for a promoted one */
+  sourceLabels?: string[];
+  /** Relative size in the series, 100 = the usual size (a smaller pouch of the same kind = 70) */
+  size?: number;
+  /** Where it came from: a position id or a board photo id (to spot duplicates) */
+  sourceId?: string;
   results: Record<string, CatalogResult>; // by version id
 }
 
@@ -56,8 +66,18 @@ export interface CatalogVersion {
   createdAt: number;
 }
 
+/** Something that must look the same in every photo of the series: a pouch, a logo, a label */
+export interface CatalogSample extends CatalogRef {
+  /** What it is, in her words: «пауч: белый матовый», «логотип» */
+  role: string;
+}
+
 export interface CatalogState {
   refs: CatalogRef[];
+  /** «Одинаковое в серии»: up to 3 samples sent with every photo */
+  samples?: CatalogSample[];
+  /** Match scale and framing to the first ★ photo of another item */
+  matchApproved?: boolean;
   recipe: string;
   category: CatalogCategory;
   aspectRatio: string;
@@ -175,7 +195,8 @@ export function buildShotPrompt(version: Pick<CatalogVersion, 'recipe' | 'catego
 export async function generateCatalogShot(
   item: CatalogItem,
   version: CatalogVersion,
-  refs: CatalogRef[]
+  refs: CatalogRef[],
+  series?: { samples?: CatalogSample[]; approvedShot?: string }
 ): Promise<string> {
   const usedRefs = refs.filter((r) => version.refIds.includes(r.id)).slice(0, 3);
   const parts: Array<Record<string, unknown>> = [
@@ -187,6 +208,30 @@ export async function generateCatalogShot(
     parts.push({ text: `STYLE REFERENCE ${i + 1}:` });
     parts.push(inline(ref.src));
   });
+  // Series: elements that must look identical in every photo (packaging, logo), and one approved shot to match scale
+  (series?.samples || []).slice(0, 3).forEach((sm, i) => {
+    parts.push({
+      text:
+        `SERIES ELEMENT ${i + 1}${sm.role ? ` — ${sm.role}` : ''}: this element must look exactly the same in every photo of this series ` +
+        '(same colour, material, finish, print and proportions). If the same element in the original photo is unclear, dirty or off-colour, ' +
+        'match it to this sample. Never copy anything else from this image and never change this product’s own text.',
+    });
+    parts.push(inline(sm.src));
+  });
+  if (series?.approvedShot) {
+    parts.push({
+      text:
+        'APPROVED SHOT FROM THE SAME SERIES: match its camera distance, framing, scale, background and light exactly, so the two photos look ' +
+        'like one shoot. Do not copy its product.',
+    });
+    parts.push(inline(series.approvedShot));
+  }
+  const size = item.size && item.size !== 100 ? item.size : undefined;
+  if (size) {
+    parts.push({
+      text: `RELATIVE SIZE: in real life this product is about ${size}% of the size of the standard item in this series. Keep the same camera distance as for the standard item, so it appears ${size < 100 ? 'smaller' : 'larger'} in the frame by that amount.`,
+    });
+  }
 
   const payload = {
     contents: [{ role: 'user', parts }],
@@ -313,4 +358,26 @@ export function fileBaseName(fileName: string): string {
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+
+/** Take numbers for [src, ...history], newest first; old data without numbers counts down from the total */
+export function takeNums(r?: CatalogResult): number[] {
+  if (!r) return [];
+  const total = (r.src ? 1 : 0) + (r.history?.length || 0);
+  if (r.nums && r.nums.length === total) return r.nums;
+  return Array.from({ length: total }, (_, i) => total - i);
+}
+
+/** Labels for [original, ...originalHistory]; the bottom one is always the client's original */
+export function sourceLabels(it: CatalogItem): string[] {
+  const total = 1 + (it.originalHistory?.length || 0);
+  if (it.sourceLabels && it.sourceLabels.length === total) return it.sourceLabels;
+  return Array.from({ length: total }, (_, i) => (i === total - 1 ? 'оригинал' : 'прежний исходник'));
+}
+
+/** Keep at most `max` entries but never lose the last one (the client's original) */
+export function keepWithLast<T>(list: T[], max: number): T[] {
+  if (list.length <= max) return list;
+  return [...list.slice(0, max - 1), list[list.length - 1]];
 }

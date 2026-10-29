@@ -128,14 +128,19 @@ export function addLine(m: BoardMatrix, axis: 'rows' | 'cols'): BoardMatrix {
   const isProducts = m.productsAlong === axis;
   const list = m[axis];
   const label = isProducts ? `Товар ${list.length + 1}` : `Ракурс ${list.length + 1}`;
-  return { ...m, [axis]: [...list, label] };
+  const lineProductIds = isProducts && m.lineProductIds ? [...m.lineProductIds, null] : m.lineProductIds;
+  return { ...m, [axis]: [...list, label], lineProductIds };
 }
 
 /** Remove one line; its photos stay on the board just below the grid, later lines shift back */
 export function removeLine(m: BoardMatrix, axis: 'rows' | 'cols', idx: number, cards: Card[]): { matrix: BoardMatrix; cards: Card[] } {
   if (m[axis].length <= 1) return { matrix: m, cards };
   const members = membersOf(m, cards);
-  const matrix: BoardMatrix = { ...m, [axis]: m[axis].filter((_, i) => i !== idx) };
+  const matrix: BoardMatrix = {
+    ...m,
+    [axis]: m[axis].filter((_, i) => i !== idx),
+    lineProductIds: m.productsAlong === axis && m.lineProductIds ? m.lineProductIds.filter((_, i) => i !== idx) : m.lineProductIds,
+  };
   let outX = m.x;
   const outY = m.y + matrixHeight(matrix) + 60;
   return {
@@ -156,12 +161,13 @@ export function removeLine(m: BoardMatrix, axis: 'rows' | 'cols', idx: number, c
 }
 
 /** Photos grouped by product line: [product label, photos by angle (null = empty cell)] */
-export function productLines(m: BoardMatrix, cards: Card[]): { name: string; photos: (Card | null)[] }[] {
+export function productLines(m: BoardMatrix, cards: Card[]): { name: string; productId: string | null; photos: (Card | null)[] }[] {
   const members = membersOf(m, cards);
   const products = m.productsAlong === 'rows' ? m.rows : m.cols;
   const angles = m.productsAlong === 'rows' ? m.cols : m.rows;
   return products.map((name, p) => ({
     name,
+    productId: m.lineProductIds?.[p] ?? null,
     photos: angles.map((_, a) => {
       const hit = cards.find((card) => {
         const cell = members.get(card.id);
@@ -173,18 +179,65 @@ export function productLines(m: BoardMatrix, cards: Card[]): { name: string; pho
   }));
 }
 
-/** Each product line with at least one photo → a position (first photo = original, the rest by angle) */
-export function matrixToPositionDrafts(m: BoardMatrix, cards: Card[]): Omit<ProductItem, 'id'>[] {
+export type PositionDraft = Omit<ProductItem, 'id'> & { productId: string | null };
+
+/**
+ * Each product line with at least one photo → a position (first photo = original, the rest by angle).
+ * `fullSize` gives back the full-size photo for a card that came from a position cell.
+ */
+export function matrixToPositionDrafts(m: BoardMatrix, cards: Card[], fullSize?: (card: Card) => string | undefined): PositionDraft[] {
   return productLines(m, cards)
-    .map((line): Omit<ProductItem, 'id'> | null => {
-      const filled = line.photos.map((c) => c?.src || null);
+    .map((line): PositionDraft | null => {
+      const filled = line.photos.map((c) => (c ? fullSize?.(c) || c.src : null));
       const first = filled.findIndex(Boolean);
       if (first < 0) return null;
       const rest = filled.slice(first + 1);
       while (rest.length && !rest[rest.length - 1]) rest.pop();
-      return { name: line.name, photoDataUrl: filled[first] as string, variants: rest };
+      return { name: line.name, productId: line.productId, photoDataUrl: filled[first] as string, variants: rest };
     })
-    .filter((x): x is Omit<ProductItem, 'id'> => x !== null);
+    .filter((x): x is PositionDraft => x !== null);
+}
+
+/**
+ * Positions → a grid on the board: one line per product, its photos across (original first).
+ * `dims` gives each photo's width/height ratio so the cards keep their shape.
+ */
+export function matrixFromPositions(
+  x: number,
+  y: number,
+  products: ProductItem[],
+  ratioOf: (src: string) => number
+): { matrix: BoardMatrix; cards: Card[] } {
+  const photosOf = (p: ProductItem) => [p.photoDataUrl, ...(p.variants || [])];
+  const cols = Math.max(1, ...products.map((p) => photosOf(p).length));
+  const matrix = newMatrix(x, y, Math.max(1, products.length), cols);
+  matrix.name = 'Позиции';
+  matrix.linked = true;
+  matrix.rows = products.map((p) => p.name || 'Товар');
+  matrix.cols = Array.from({ length: cols }, (_, i) => (i === 0 ? 'исходник' : `ракурс ${i + 1}`));
+  matrix.lineProductIds = products.map((p) => p.id);
+  const cards: Card[] = [];
+  let z = 1;
+  products.forEach((p, r) =>
+    photosOf(p).forEach((src, c) => {
+      if (!src) return;
+      const ratio = ratioOf(src) || 1;
+      const base: Card = {
+        id: `card_pos_${p.id}_${c}_${Math.random().toString(36).slice(2, 6)}`,
+        x: 0,
+        y: 0,
+        width: 200,
+        height: Math.round(200 * ratio),
+        src,
+        name: [p.name, p.angles?.[String(c - 1)]].filter(Boolean).join(' · '),
+        aspectRatio: 1 / ratio,
+        zIndex: ++z,
+        fromSlot: { productId: p.id, slot: c - 1 },
+      };
+      cards.push(placeInCell(matrix, base, r, c));
+    })
+  );
+  return { matrix, cards };
 }
 
 /** A grid for photos already sorted into groups: each group becomes a product line */

@@ -40,7 +40,7 @@ import { isImageFile, normalizeImageFiles } from './utils/heic';
 import { FolderFile, groupByFolder, folderFilesFromInput, snapshotFolderFiles } from './utils/folderImport';
 import { makeExample, promptByName, withExample } from './utils/promptExamples';
 import { ensureVariantCols, folderImportNote, importFolderToPositions, isGenericName, splitSku } from './utils/positionsImport';
-import { MATRIX_LABEL_H, MATRIX_LABEL_W, addLine, isOverMatrix, matrixFromGroups, matrixToPositionDrafts, membersOf, newMatrix, removeLine, snapIntoMatrix, transposeMatrix } from './utils/matrix';
+import { MATRIX_LABEL_H, MATRIX_LABEL_W, addLine, matrixFromPositions, isOverMatrix, matrixFromGroups, matrixToPositionDrafts, membersOf, newMatrix, removeLine, snapIntoMatrix, transposeMatrix } from './utils/matrix';
 import type { MatrixApi } from './components/BoardMatrixView';
 import { TopBar, TOOL_LABELS, StudioView } from './components/TopBar';
 import { VideoTab } from './components/VideoTab';
@@ -62,6 +62,8 @@ import { RightDrawer } from './components/RightDrawer';
 import { DockSlot } from './components/DockSlot';
 import { CatalogStudio } from './components/CatalogStudio';
 import { Info } from './components/Info';
+import { angleOf, slotGet } from './utils/positions';
+import { cropProducts, detectProducts } from './utils/cutProducts';
 
 interface CanvasCropQueueItem {
   id: string;
@@ -703,6 +705,8 @@ export default function App() {
     if (files.length > 0) setPendingFolder({ files, pos });
   }, []);
 
+  /** Set further down: lays positions out on the board as «Оси» */
+  const showOnBoardRef = useRef<((ids?: string[]) => void) | null>(null);
   const handleImportFolderAsProducts = useCallback(
     async (folderFiles: FolderFile[]) => {
       const r = await importFolderToPositions(folderFiles, productsList, (done, total, label) =>
@@ -714,6 +718,10 @@ export default function App() {
       setFolderImportStatus(folderImportNote(r));
       setTimeout(() => setFolderImportStatus(null), 8000);
       setIsProductLibraryOpen(true);
+      // the same products appear on the board as «Оси»
+      const before = new Set(productsList.map((p) => p.id));
+      const fresh = r.next.filter((p) => !before.has(p.id)).map((p) => p.id);
+      if (fresh.length) showOnBoardRef.current?.(fresh);
     },
     [productsList, activeProjectId]
   );
@@ -2024,21 +2032,38 @@ export default function App() {
       const p = latestProjectsRef.current.find((x) => x.id === activeProjectId);
       const m = p?.matrices?.find((x) => x.id === id);
       if (!p || !m) return;
-      const drafts = matrixToPositionDrafts(m, p.cards || []);
+      // a photo that came from a position cell goes back at full size
+      const fullSize = (card: Card) => {
+        if (!card.fromSlot) return undefined;
+        const prod = latestProductsRef.current.find((x) => x.id === card.fromSlot!.productId);
+        return prod ? slotGet(prod, card.fromSlot.slot) || undefined : undefined;
+      };
+      const drafts = matrixToPositionDrafts(m, p.cards || [], fullSize);
       if (drafts.length === 0) return;
       (async () => {
         const fresh: ProductItem[] = [];
+        let next = [...latestProductsRef.current];
+        let updated = 0;
         let n = 0;
         for (const d of drafts) {
           const photo = await compressImageDataUrl(d.photoDataUrl, 1200, 0.85);
           const variants = await Promise.all((d.variants || []).map((v) => (v ? compressImageDataUrl(v, 1200, 0.85) : Promise.resolve(null))));
-          fresh.push({ ...d, id: `prod_${Date.now()}_${n++}_${Math.random().toString(36).slice(2, 6)}`, photoDataUrl: photo, variants, category: m.name && m.name !== 'Оси' ? m.name : undefined });
+          const { productId, ...draft } = d;
+          const existing = m.linked && productId ? next.findIndex((x) => x.id === productId) : -1;
+          if (existing >= 0) {
+            // tied to a position: update it in place (same id, group, code, price)
+            next[existing] = { ...next[existing], name: draft.name || next[existing].name, photoDataUrl: photo, variants, finalIndex: undefined };
+            updated++;
+          } else {
+            fresh.push({ ...draft, id: `prod_${Date.now()}_${n++}_${Math.random().toString(36).slice(2, 6)}`, photoDataUrl: photo, variants, category: m.name && m.name !== 'Оси' && m.name !== 'Позиции' ? m.name : undefined });
+          }
         }
-        const maxVariants = Math.max(0, ...fresh.map((f) => f.variants?.length || 0));
+        next = [...next, ...fresh];
+        const maxVariants = Math.max(0, ...next.map((f) => f.variants?.length || 0));
         if (maxVariants) ensureVariantCols(maxVariants);
-        handleSaveProducts([...latestProductsRef.current, ...fresh]);
+        handleSaveProducts(next);
         setIsProductLibraryOpen(true);
-        setFolderImportStatus(`Из осей в позиции: ${fresh.length}. Ракурсы легли в колонки по порядку.`);
+        setFolderImportStatus(`Из осей в позиции: обновлено ${updated}, новых ${fresh.length}. Ракурсы легли в колонки по порядку.`);
         setTimeout(() => setFolderImportStatus(null), 6000);
       })();
     },
@@ -2076,6 +2101,159 @@ export default function App() {
     }),
     [withMatrix, handleMatrixToPositions, activeProjectId]
   );
+  /** Positions → «Оси» on the board. Products already in a linked grid are skipped; new ones are added as lines */
+  const handleShowPositionsOnBoard = useCallback(
+    (ids?: string[]) => {
+      // wait a tick: right after an import the new positions are still on their way into state
+      setTimeout(async () => {
+        const p = latestProjectsRef.current.find((x) => x.id === activeProjectId);
+        if (!p) return;
+        const linked = (p.matrices || []).find((m) => m.linked);
+        const onBoard = new Set((p.matrices || []).flatMap((m) => (m.lineProductIds || []).filter(Boolean) as string[]));
+        const products = latestProductsRef.current.filter((x) => x.photoDataUrl && (!ids || ids.includes(x.id)) && !onBoard.has(x.id));
+        if (products.length === 0) {
+          setFolderImportStatus('Эти позиции уже на доске в осях.');
+          setTimeout(() => setFolderImportStatus(null), 4000);
+          return;
+        }
+        // card shapes need the photos' proportions
+        const ratios = new Map<string, number>();
+        await Promise.all(
+          products.flatMap((x) => [x.photoDataUrl, ...(x.variants || [])]).filter(Boolean).map(
+            (src) =>
+              new Promise<void>((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                  ratios.set(src as string, (img.naturalHeight || 1) / (img.naturalWidth || 1));
+                  resolve();
+                };
+                img.onerror = () => resolve();
+                img.src = src as string;
+              })
+          )
+        );
+        const ratioOf = (src: string) => ratios.get(src) || 1;
+        patchActive((proj) => {
+          const cardsNow = proj.cards || [];
+          if (linked && linked.productsAlong === 'rows') {
+            // add the new products as lines of the existing grid
+            const fresh = matrixFromPositions(linked.x, linked.y + linked.rows.length * linked.cellH, products, ratioOf);
+            const cols = Math.max(linked.cols.length, fresh.matrix.cols.length);
+            const matrix: BoardMatrix = {
+              ...linked,
+              rows: [...linked.rows, ...fresh.matrix.rows],
+              cols: Array.from({ length: cols }, (_, i) => linked.cols[i] || fresh.matrix.cols[i]),
+              lineProductIds: [...(linked.lineProductIds || linked.rows.map(() => null)), ...products.map((x) => x.id)],
+            };
+            return { ...proj, matrices: (proj.matrices || []).map((m) => (m.id === linked.id ? matrix : m)), cards: [...cardsNow, ...fresh.cards] };
+          }
+          // a new grid under everything on the board
+          const minX = cardsNow.length ? Math.min(...cardsNow.map((c) => c.x)) : 0;
+          const maxY = cardsNow.length ? Math.max(...cardsNow.map((c) => c.y + (c.height || 300))) : 0;
+          const { matrix, cards } = matrixFromPositions(Math.round(minX + 200), Math.round(maxY + 200), products, ratioOf);
+          const zoom = proj.zoom || 1;
+          const pan = cardsNow.length ? proj.pan : { x: Math.round(40 + 200 * zoom - matrix.x * zoom), y: Math.round(90 - matrix.y * zoom) };
+          return { ...proj, pan, matrices: [...(proj.matrices || []), matrix], cards: [...cardsNow, ...cards] };
+        });
+        setFolderImportStatus(`На доске в осях: ${products.length} позиций.`);
+        setTimeout(() => setFolderImportStatus(null), 5000);
+      }, 60);
+    },
+    [activeProjectId, patchActive]
+  );
+  showOnBoardRef.current = handleShowPositionsOnBoard;
+
+  /** «разрезать на товары»: find each product on the photo and lay the cut-outs next to it, as one group */
+  const handleCutCard = useCallback(
+    async (card: Card) => {
+      if (!hasGenerationAccess()) {
+        setIsSettingsOpen(true);
+        return;
+      }
+      setFolderImportStatus(`Ищу товары на «${card.name || 'фото'}»…`);
+      try {
+        const found = await detectProducts(card.src);
+        if (found.length < 2) {
+          setFolderImportStatus(found.length ? 'Нашёлся один товар — резать нечего.' : 'Товаров на фото не нашлось.');
+          setTimeout(() => setFolderImportStatus(null), 5000);
+          return;
+        }
+        const pieces = await cropProducts(card.src, found);
+        patchActive((proj) => {
+          let z = (proj.cards || []).reduce((m, c) => Math.max(m, c.zIndex || 1), 1);
+          let x = card.x + card.width + 80;
+          const cards: Card[] = pieces.map((piece, i) => {
+            const w = 180;
+            const h = Math.round(w * (piece.h / piece.w));
+            const c: Card = {
+              id: `card_cut_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+              x: Math.round(x),
+              y: Math.round(card.y),
+              width: w,
+              height: h,
+              src: piece.src,
+              name: piece.label,
+              aspectRatio: w / h,
+              zIndex: ++z,
+            };
+            x += w + 24;
+            return c;
+          });
+          const group: CardGroup = {
+            id: `group_cut_${Date.now()}`,
+            type: 'group',
+            name: `${card.name || 'фото'} · товары`,
+            children: cards.map((c) => c.id),
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            color: '#0a0a0a',
+          };
+          return { ...proj, cards: [...(proj.cards || []), ...cards], groups: [...(proj.groups || []), group] };
+        });
+        setFolderImportStatus(`Вырезано товаров: ${pieces.length}. Дальше можно «в каталог» или «в позиции».`);
+        setTimeout(() => setFolderImportStatus(null), 6000);
+      } catch (err) {
+        setFolderImportStatus(`Не получилось разрезать: ${err instanceof Error ? err.message : String(err)}`);
+        setTimeout(() => setFolderImportStatus(null), 7000);
+      }
+    },
+    [patchActive]
+  );
+
+  /** A photo dragged out of a position cell onto the board */
+  const handleDropSlot = useCallback(
+    (ref: { id: string; slot: number }, pos: { x: number; y: number }) => {
+      const prod = latestProductsRef.current.find((x) => x.id === ref.id);
+      const src = prod ? slotGet(prod, ref.slot) : '';
+      if (!prod || !src) return;
+      const img = new Image();
+      img.onload = () => {
+        const w = 220;
+        const h = Math.round(w * ((img.naturalHeight || 1) / (img.naturalWidth || 1)));
+        patchActive((proj) => {
+          const z = (proj.cards || []).reduce((m, c) => Math.max(m, c.zIndex || 1), 1) + 1;
+          const card: Card = {
+            id: `card_slot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            x: Math.round(pos.x),
+            y: Math.round(pos.y),
+            width: w,
+            height: h,
+            src,
+            name: [prod.name, angleOf(prod, ref.slot)].filter(Boolean).join(' · '),
+            aspectRatio: w / h,
+            zIndex: z,
+            fromSlot: { productId: prod.id, slot: ref.slot },
+          };
+          return { ...proj, cards: [...(proj.cards || []), card] };
+        });
+      };
+      img.src = src;
+    },
+    [patchActive]
+  );
+
   const handleAddMatrix = useCallback(
     (at: { x: number; y: number }) =>
       patchActive((p) => ({ ...p, matrices: [...(p.matrices || []), newMatrix(Math.round(at.x + MATRIX_LABEL_W), Math.round(at.y + MATRIX_LABEL_H + 30))] })),
@@ -2136,6 +2314,7 @@ export default function App() {
     [activeProjectId, patchActive]
   );
 
+  const [catalogProgress, setCatalogProgress] = useState<{ done: number; total: number } | null>(null);
   const [catalogIncoming, setCatalogIncoming] = useState<{ key: number; items: { name: string; src: string }[] } | null>(null);
   const handleCardsToCatalog = useCallback(
     (cardIds: string[]) => {
@@ -2515,7 +2694,7 @@ export default function App() {
               </p>
               {choice(
                 'В позиции',
-                'Таблица товаров («Продукты»): из неё делается каталог и экспорт для сайта. Если такая позиция уже есть (по коду или названию), фото добавится к ней.',
+                'Таблица товаров («Продукты») — чистовик для каталога и экспорта. На доске сразу появятся «Оси» с теми же товарами: там удобно разбирать, а «→ в позиции» вернёт порядок обратно. Если позиция уже есть (по коду или названию), фото добавится к ней.',
                 () => {
                   const f = pendingFolder.files;
                   setPendingFolder(null);
@@ -2526,12 +2705,6 @@ export default function App() {
               {choice('На доску', 'Свободно разложить и посмотреть: каждая папка станет группой. Потом фото можно перетащить в позиции или выделить и нажать «в позиции».', () => {
                 const { files, pos } = pendingFolder;
                 setPendingFolder(null);
-                handleAddFolder(files, pos);
-              })}
-              {choice('И туда, и туда', 'Позиции заполнятся, а на доске появятся те же фото группами — разбирать и сравнивать.', async () => {
-                const { files, pos } = pendingFolder;
-                setPendingFolder(null);
-                await handleImportFolderAsProducts(files);
                 handleAddFolder(files, pos);
               })}
               <div className="flex justify-end">
@@ -2627,6 +2800,7 @@ export default function App() {
         view={studioView}
         onChangeView={setStudioView}
         onLogoClick={handleLogoClick}
+        catalogProgress={catalogProgress}
       />
 
       {/* Main Workspace: Sidebar + Infinite Canvas */}
@@ -2698,6 +2872,7 @@ export default function App() {
           onAddFolder={askAboutFolder}
           onDeleteSelection={handleDeleteSelection}
           onDropProducts={handleDropProducts}
+          onDropSlot={handleDropSlot}
           onChangeCardTakes={handleChangeCardTakes}
           onEditCard={handleEditCard}
           quickEditPrompts={quickEditPrompts}
@@ -2735,6 +2910,7 @@ export default function App() {
           onUngroup={handleUngroup}
           onRenameGroup={handleRenameGroup}
           onMakeExample={handleMakeExampleFromCard}
+          onCutCard={handleCutCard}
           examplePromptNames={examplePromptNames}
           matrixApi={matrixApi}
           onAddMatrix={handleAddMatrix}
@@ -2749,9 +2925,11 @@ export default function App() {
           onChangeSiteMockupOpacity={handleChangeSiteMockupOpacity}
         />
 
-        {studioView === 'catalog' && (
+        {/* Kept alive on every tab, so a run keeps going while you work on the board */}
+        {(
           <CatalogStudio
-            isOpen={true}
+            isOpen={studioView === 'catalog'}
+            onProgress={setCatalogProgress}
             onClose={() => setStudioView('board')}
             projectId={activeProject.id}
             projectName={activeProject.name}
@@ -2795,6 +2973,7 @@ export default function App() {
                   products={productsList}
                   onSaveProducts={handleSaveProducts}
                   onAddProductToCanvas={handleAddProductToCanvas}
+                  onShowOnBoard={handleShowPositionsOnBoard}
                   projectName={activeProject.name}
                   otherProjects={projects.filter((p) => p.id !== activeProjectId).map((p) => ({ id: p.id, name: p.name }))}
                   onMoveToProject={handleMoveProductsToProject}

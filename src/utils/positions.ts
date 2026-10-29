@@ -13,6 +13,20 @@ export function slotGet(p: ProductItem, slot: number): string {
   return slot < 0 ? p.photoDataUrl : p.variants?.[slot] || '';
 }
 
+/** What a cell shows: «общее», «бок», «деталь», «в действии»… Each product has its own set. */
+export const ANGLE_PRESETS = ['общее', 'бок', 'сзади', 'сверху', 'деталь', 'деталь 2', 'деталь 3', 'в действии', 'в руке', 'упаковка'];
+
+export function angleOf(p: ProductItem, slot: number): string {
+  return p.angles?.[String(slot)] || '';
+}
+
+export function setAngle(p: ProductItem, slot: number, angle: string): ProductItem {
+  const angles = { ...(p.angles || {}) };
+  if (angle) angles[String(slot)] = angle;
+  else delete angles[String(slot)];
+  return { ...p, angles };
+}
+
 export function slotSet(p: ProductItem, slot: number, src: string): ProductItem {
   if (slot < 0) return { ...p, photoDataUrl: src };
   const variants = [...(p.variants || [])];
@@ -36,10 +50,13 @@ export function movePhoto(list: ProductItem[], from: SlotRef, to: SlotRef): Prod
   const moving = slotGet(src, from.slot);
   if (!moving) return list;
   const displaced = slotGet(dst, to.slot);
+  // the «ракурс» label travels with its photo
+  const movingAngle = angleOf(src, from.slot);
+  const displacedAngle = angleOf(dst, to.slot);
   return list.map((p) => {
     let next = p;
-    if (p.id === from.id) next = slotSet(next, from.slot, displaced);
-    if (p.id === to.id) next = slotSet(next, to.slot, moving);
+    if (p.id === from.id) next = setAngle(slotSet(next, from.slot, displaced), from.slot, displaced ? displacedAngle : '');
+    if (p.id === to.id) next = setAngle(slotSet(next, to.slot, moving), to.slot, movingAngle);
     // The ★ follows the photo inside one row; across rows it is cleared where it pointed at a moved cell
     if (p.id === from.id && p.id === to.id && (p.finalIndex ?? -1) === from.slot) next = { ...next, finalIndex: to.slot };
     else if (p.id === from.id && (p.finalIndex ?? -1) === from.slot && from.id !== to.id) next = { ...next, finalIndex: undefined };

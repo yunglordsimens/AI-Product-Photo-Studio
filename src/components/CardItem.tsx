@@ -9,6 +9,8 @@ interface CardItemProps {
   isSoleSelected?: boolean;
   /** Set for a photo made with a master prompt: makes it that prompt's example */
   onMakeExample?: (card: Card) => void;
+  /** «разрезать на товары»: one photo with many products → a photo per product */
+  onCut?: (card: Card) => void;
   /** Faded back while another group is in focus */
   dimmed?: boolean;
   isConnectingSource?: boolean;
@@ -43,6 +45,7 @@ export const CardItem: React.FC<CardItemProps> = memo(
     isSelected,
     isSoleSelected = false,
     onMakeExample,
+    onCut,
     dimmed = false,
     isConnectingSource = false,
     isConnectionMode = false,
@@ -124,6 +127,18 @@ export const CardItem: React.FC<CardItemProps> = memo(
                 title={`Сделать примером мастер-промпта «${card.meta?.masterPromptName}»`}
               >
                 в пример
+              </button>
+            )}
+            {onCut && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCut(card);
+                }}
+                className="px-1.5 h-5 hover:bg-[var(--soft)]"
+                title="На фото несколько товаров? Найти каждый и вырезать отдельным фото"
+              >
+                разрезать
               </button>
             )}
             <button onClick={(e) => { e.stopPropagation(); onPreview(card); }} className="px-1.5 h-5 hover:bg-[var(--soft)]" title="Просмотр">

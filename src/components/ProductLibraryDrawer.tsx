@@ -8,7 +8,7 @@ import { folderFilesFromInput, snapshotFolderFiles } from '../utils/folderImport
 import { Info } from './Info';
 import { ensureVariantCols, folderImportNote, importFolderToPositions } from '../utils/positionsImport';
 import { EXPORT_PRESETS, EXPORT_SIZES, ExportPhotos, ExportPreset, ExportSize, FitMode, exportPositions } from '../utils/positionsExport';
-import { NO_GROUP, SLOT_DRAG_TYPE, SlotRef, groupByCategory, mergeInto, movePhoto, renameCategory, setCategory, slotSet } from '../utils/positions';
+import { ANGLE_PRESETS, NO_GROUP, SLOT_DRAG_TYPE, SlotRef, angleOf, groupByCategory, mergeInto, movePhoto, renameCategory, setAngle, setCategory, slotSet } from '../utils/positions';
 
 /** One square photo slot in the positions table; ★ marks the final photo of the row. */
 /** Positions copied with ⌘C / ⌘X; kept across projects so they can be pasted into another one */
@@ -22,8 +22,36 @@ const Slot: React.FC<{
   onPick: () => void;
   onMarkFinal: () => void;
   onDelete: () => void;
-}> = ({ src, label, isFinal, dragRef, onPick, onMarkFinal, onDelete }) => (
+  /** What this photo shows (общее, бок, деталь…), per product */
+  angle?: string;
+  onAngle?: (angle: string) => void;
+}> = ({ src, label, isFinal, dragRef, onPick, onMarkFinal, onDelete, angle = '', onAngle }) => (
   <div className={`relative w-[104px] h-[104px] bg-[var(--soft)] group/slot ${isFinal && src ? 'ofst-outline' : ''}`}>
+    {src && onAngle && (
+      <select
+        value={ANGLE_PRESETS.includes(angle) || !angle ? angle : '__own'}
+        onChange={(e) => {
+          if (e.target.value === '__new') {
+            const own = window.prompt('Что на этом фото?', angle);
+            if (own !== null) onAngle(own.trim());
+          } else if (e.target.value !== '__own') onAngle(e.target.value);
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        className={`absolute right-0 top-0 z-10 h-4 max-w-[78px] px-0.5 text-[10px] leading-4 cursor-pointer ${
+          angle ? 'bg-[var(--fg)] text-white' : 'bg-white/85 text-[var(--grey)] opacity-0 group-hover/slot:opacity-100'
+        }`}
+        title="Что на этом фото: общее, бок, деталь, в действии…"
+      >
+        <option value="">ракурс?</option>
+        {ANGLE_PRESETS.map((a) => (
+          <option key={a} value={a}>
+            {a}
+          </option>
+        ))}
+        {angle && !ANGLE_PRESETS.includes(angle) && <option value="__own">{angle}</option>}
+        <option value="__new">своё…</option>
+      </select>
+    )}
     {src ? (
       <img
         src={src}
@@ -138,6 +166,38 @@ interface ProductLibraryDrawerProps {
   projectName?: string;
   otherProjects?: { id: string; name: string }[];
   onMoveToProject?: (ids: string[], projectId: string) => void;
+  /** Lay the positions out on the board as «Оси» (only the ones not there yet) */
+  onShowOnBoard?: (ids?: string[]) => void;
+}
+
+/** A position name that can be read in full: the wheel scrolls it sideways when it doesn't fit */
+function NameField({ value, onChange, onDone }: { value: string; onChange: (v: string) => void; onDone: () => void }) {
+  const ref = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth + 1) return;
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      const before = el.scrollLeft;
+      el.scrollLeft += d;
+      if (el.scrollLeft !== before) e.preventDefault();
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+  return (
+    <input
+      ref={ref}
+      type="text"
+      value={value}
+      title={value}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={onDone}
+      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+      className="w-full text-[13px] font-medium !bg-transparent py-0.5 focus:!bg-[var(--soft)]"
+    />
+  );
 }
 
 export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
@@ -149,6 +209,7 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
   projectName = 'Проект',
   otherProjects = [],
   onMoveToProject,
+  onShowOnBoard,
 }) => {
   const [showExport, setShowExport] = useState(false);
   const [exportPreset, setExportPreset] = useState<ExportPreset>('names');
@@ -280,6 +341,10 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
     commit(r.next);
     if (r.maxPhotos > 1) ensureVariantCols(r.maxPhotos - 1);
     setBatchNote(folderImportNote(r));
+    // the same products appear on the board as «Оси», to see them all at once
+    const before = new Set(localProducts.map((p) => p.id));
+    const fresh = r.next.filter((p) => !before.has(p.id)).map((p) => p.id);
+    if (fresh.length && onShowOnBoard) onShowOnBoard(fresh);
   };
 
   const handleBatchList = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -636,6 +701,15 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
           <button onClick={() => setShowExport((v) => !v)} className={`ofst-cell ${showExport ? 'is-on' : ''}`} title="CSV для магазина и ZIP с фото, названными по позициям">
             Экспорт
           </button>
+          {onShowOnBoard && localProducts.length > 0 && (
+            <button
+              onClick={() => onShowOnBoard(selectedIds.size ? [...selectedIds] : undefined)}
+              className="ofst-cell"
+              title="Разложить позиции на доске осями (строка — товар, столбцы — его фото). Те, что уже на доске, не повторяются"
+            >
+              Оси на доске
+            </button>
+          )}
           <span className="flex-1" />
           <span className="text-[var(--grey)] px-1">Варианты {shownCols}</span>
           <button className="ofst-cell w-7" onClick={() => changeVariantCols(variantCols + 1)} title="Добавить колонку вариантов">
@@ -964,6 +1038,8 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                           onPick={() => handleTriggerUpload(idx)}
                           onMarkFinal={() => setFinal(idx, -1)}
                           onDelete={() => clearSlot(prod.id, -1)}
+                          angle={angleOf(prod, -1)}
+                          onAngle={(a) => commit(localProducts.map((p) => (p.id === prod.id ? setAngle(p, -1, a) : p)))}
                         />
                       </td>
                       {variants.map((v, vi) => (
@@ -982,6 +1058,8 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                             onPick={() => triggerVariantUpload(idx, vi)}
                             onMarkFinal={() => setFinal(idx, vi)}
                             onDelete={() => clearSlot(prod.id, vi)}
+                            angle={angleOf(prod, vi)}
+                            onAngle={(a) => commit(localProducts.map((p) => (p.id === prod.id ? setAngle(p, vi, a) : p)))}
                           />
                         </td>
                       ))}
@@ -990,14 +1068,7 @@ export const ProductLibraryDrawer: React.FC<ProductLibraryDrawerProps> = ({
                         title="Перетащи сюда другую строку — она станет ещё одним ракурсом этой позиции"
                         {...dropHandlers(`row:${prod.id}`, (e) => dropOnRow(e, prod.id))}
                       >
-                        <input
-                          type="text"
-                          value={prod.name}
-                          onChange={(e) => handleNameChange(idx, e.target.value)}
-                          onBlur={() => commit(localProducts)}
-                          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-                          className="w-full text-[13px] font-medium !bg-transparent py-0.5 focus:!bg-[var(--soft)]"
-                        />
+                        <NameField value={prod.name} onChange={(v) => handleNameChange(idx, v)} onDone={() => commit(localProducts)} />
                         {!prod.photoDataUrl && <div className="mt-1 text-[11px]"><mark className="bg-[var(--marker)] px-0.5">нет фото</mark></div>}
                         <div className="mt-1 flex items-center gap-3 text-[11px] text-[var(--grey)]">
                           <button onClick={() => handleDeleteRow(idx)} className="hover:bg-[var(--marker)] hover:text-[var(--fg)] cursor-pointer">удалить</button>

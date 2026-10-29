@@ -17,6 +17,9 @@ import {
   emptyCatalogState,
   fileBaseName,
   generateCatalogShot,
+  keepWithLast,
+  sourceLabels,
+  takeNums,
   loadCatalogState,
   newId,
   saveCatalogState,
@@ -29,6 +32,7 @@ import { fileSafe } from '../utils/positionsExport';
 import { isImageFile, normalizeImageFiles } from '../utils/heic';
 import { SOURCE_FIX_MARKER } from '../utils/storage';
 import { renderBeforeAfter } from '../utils/beforeAfter';
+import { isGenericName, normName } from '../utils/positionsImport';
 import { makeExample, withExample } from '../utils/promptExamples';
 import { Info } from './Info';
 
@@ -46,6 +50,8 @@ interface CatalogStudioProps {
   onOpenSettings: () => void;
   /** Photos sent from the board («в каталог»); a new `key` adds them once */
   incomingItems?: { key: number; items: { name: string; src: string }[] } | null;
+  /** Reports a run in progress (null when idle), so the tab can show it while you are elsewhere */
+  onProgress?: (p: { done: number; total: number } | null) => void;
 }
 
 const CONCURRENCY = 2;
@@ -67,10 +73,6 @@ async function prepareImage(file: File, maxSide: number, quality: number): Promi
   return out.startsWith('data:image/jpeg') ? out : null;
 }
 
-function settingsKey(v: Pick<CatalogVersion, 'recipe' | 'category' | 'aspectRatio' | 'temperature' | 'refIds' | 'model'>) {
-  return JSON.stringify([v.recipe.trim(), v.category, v.aspectRatio, v.temperature, [...v.refIds].sort(), v.model]);
-}
-
 const naturalSort = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 
 export const CatalogStudio: React.FC<CatalogStudioProps> = ({
@@ -83,6 +85,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   boardCards = [],
   masterPrompts = [],
   incomingItems,
+  onProgress,
   onSaveMasterPrompts,
   onOpenSettings,
 }) => {
@@ -103,6 +106,17 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   const [editText, setEditText] = useState('');
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [isMakingCards, setIsMakingCards] = useState(false);
+  /** Which half the ↑ ↓ keys flip; set by clicking a half */
+  const [activeSide, setActiveSide] = useState<'before' | 'after'>('after');
+  /** «рядом»: two halves; «шторка»: one frame with a divider, like Lightroom */
+  const [compareMode, setCompareMode] = useState<'side' | 'slider'>(() => {
+    try {
+      return localStorage.getItem('aips_compare_mode') === 'slider' ? 'slider' : 'side';
+    } catch {
+      return 'side';
+    }
+  });
+  const [split, setSplit] = useState(50);
   const setCompareId = (id: string | null) => {
     setCompareIdState(id);
     setAfterIdx(0);
@@ -110,16 +124,23 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   };
   const [showProductPicker, setShowProductPicker] = useState(false);
   const [refMenuOpen, setRefMenuOpen] = useState(false);
+  const [sampleMenuOpen, setSampleMenuOpen] = useState(false);
+  const [samplePicker, setSamplePicker] = useState<null | 'board' | 'products'>(null);
+  const sampleInputRef = useRef<HTMLInputElement>(null);
   const [itemsFromBoard, setItemsFromBoard] = useState(false);
 
   const stopRef = useRef(false);
+  useEffect(() => {
+    onProgress?.(isRunning ? progress : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRunning, progress]);
   const refInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   // Load per-project catalog
   useEffect(() => {
-    if (!isOpen || loadedFor === projectId) return;
+    if (loadedFor === projectId) return;
     let alive = true;
     loadCatalogState(projectId).then((state) => {
       if (!alive) return;
@@ -140,7 +161,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
     return () => {
       alive = false;
     };
-  }, [isOpen, projectId, loadedFor]);
+  }, [projectId, loadedFor]);
 
   // Persist (debounced)
   useEffect(() => {
@@ -170,7 +191,6 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
     [catalog.recipe, catalog.category, catalog.aspectRatio, catalog.temperature, catalog.refs]
   );
 
-  const settingsChanged = !activeVersion || settingsKey(activeVersion) !== settingsKey(currentSettings);
 
   const update = useCallback((fn: (prev: CatalogState) => CatalogState) => setCatalog(fn), []);
 
@@ -239,6 +259,29 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
     update((prev) => ({ ...prev, refs: [...prev.refs, ...added].slice(0, 3) }));
   };
 
+  // ---------- «Одинаковое в серии» ----------
+  const addSamples = async (picked: { name: string; src: string }[]) => {
+    const room = 3 - (catalog.samples?.length || 0);
+    const added: NonNullable<CatalogState['samples']> = [];
+    for (const it of picked.slice(0, room)) {
+      const src = await compressDataUrl(it.src, 1024, 1024, 0.88);
+      if (src.startsWith('data:image')) added.push({ id: newId('smp'), name: it.name, src, role: '' });
+    }
+    update((prev) => ({ ...prev, samples: [...(prev.samples || []), ...added].slice(0, 3) }));
+  };
+  const addSampleFiles = async (files: File[]) => {
+    const picked: { name: string; src: string }[] = [];
+    for (const f of await normalizeImageFiles(files)) {
+      const src = await prepareImage(f, 1024, 0.88);
+      if (src) picked.push({ name: f.name, src });
+    }
+    addSamples(picked);
+  };
+  const setSampleRole = (id: string, role: string) =>
+    update((prev) => ({ ...prev, samples: (prev.samples || []).map((sm) => (sm.id === id ? { ...sm, role } : sm)) }));
+  const setItemSize = (id: string, size: number) =>
+    update((prev) => ({ ...prev, items: prev.items.map((it) => (it.id === id ? { ...it, size } : it)) }));
+
   const addItemFiles = async (files: File[]) => {
     const images = (await normalizeImageFiles(files.filter((f) => isImageFile(f) || IMAGE_EXT.test(f.name)))).sort(
       (a, b) => naturalSort(a.name, b.name)
@@ -263,15 +306,50 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
     );
   };
 
-  const addItemsFromSrcs = async (picked: { name: string; src: string }[]) => {
+  const addItemsFromSrcs = async (picked: { id?: string; name: string; src: string }[]) => {
     const added: CatalogItem[] = [];
     for (const it of picked) {
       const src = await compressDataUrl(it.src, 1536, 1536, 0.9);
-      if (src.startsWith('data:image')) added.push({ id: newId('item'), name: it.name || 'фото', original: src, results: {} });
+      if (src.startsWith('data:image')) added.push({ id: newId('item'), name: it.name || 'фото', original: src, results: {}, sourceId: it.id });
     }
     update((prev) => ({ ...prev, items: [...prev.items, ...added] }));
     setNotice({ kind: 'info', text: `Добавлено ${added.length} фото.` });
   };
+
+  /** Which of these sources are already in the catalog (same position / photo, or the same name) */
+  const alreadyInCatalog = (list: { id: string; name: string }[]) => {
+    const ids = new Set(catalog.items.map((i) => i.sourceId).filter(Boolean) as string[]);
+    const names = new Set(catalog.items.map((i) => normName(i.name)));
+    return new Set(list.filter((x) => ids.has(x.id) || (x.name && names.has(normName(x.name)))).map((x) => x.id));
+  };
+
+  // ---------- Duplicates ----------
+  const [showDuplicates, setShowDuplicates] = useState(false);
+  const duplicateGroups = useMemo(() => {
+    // same source, the very same photo, or the same (meaningful) name → one group
+    const parent = catalog.items.map((_, i) => i);
+    const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+    const byKey = new Map<string, number>();
+    catalog.items.forEach((it, i) => {
+      const keys = [
+        it.sourceId ? `s:${it.sourceId}` : '',
+        `p:${it.original.length}:${it.original.slice(-64)}`,
+        isGenericName(it.name) ? '' : `n:${normName(it.name)}`,
+      ].filter(Boolean);
+      keys.forEach((k) => {
+        const j = byKey.get(k);
+        if (j === undefined) byKey.set(k, i);
+        else parent[find(i)] = find(j);
+      });
+    });
+    const groups = new Map<number, CatalogItem[]>();
+    catalog.items.forEach((it, i) => {
+      const r = find(i);
+      if (!groups.has(r)) groups.set(r, []);
+      groups.get(r)!.push(it);
+    });
+    return [...groups.values()].filter((g) => g.length > 1);
+  }, [catalog.items]);
 
   // Photos sent from the board arrive once the catalog of this project is loaded
   const handledIncoming = useRef<number | null>(null);
@@ -282,16 +360,6 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomingItems, loadedFor, projectId]);
 
-  const addFromProducts = async (picked: ProductItem[]) => {
-    const added: CatalogItem[] = [];
-    for (const p of picked) {
-      if (!p.photoDataUrl) continue;
-      const src = await compressDataUrl(p.photoDataUrl, 1536, 1536, 0.9);
-      added.push({ id: newId('item'), name: p.name || 'товар', original: src, results: {} });
-    }
-    update((prev) => ({ ...prev, items: [...prev.items, ...added] }));
-    setShowProductPicker(false);
-  };
 
   // ---------- Recipe ----------
 
@@ -318,16 +386,28 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
 
   // ---------- Run ----------
 
+  /** Versions are made by hand only; a run uses the current settings inside the active version */
   const ensureVersion = (): CatalogVersion => {
-    if (activeVersion && !settingsChanged) return activeVersion;
-    const version: CatalogVersion = {
-      id: newId('ver'),
-      label: `v${catalog.versions.length + 1}`,
-      ...currentSettings,
-      createdAt: Date.now(),
-    };
+    if (activeVersion) {
+      const refreshed: CatalogVersion = { ...activeVersion, ...currentSettings };
+      update((prev) => ({ ...prev, versions: prev.versions.map((v) => (v.id === refreshed.id ? refreshed : v)) }));
+      return refreshed;
+    }
+    const version: CatalogVersion = { id: newId('ver'), label: 'v1', ...currentSettings, createdAt: Date.now() };
     update((prev) => ({ ...prev, versions: [...prev.versions, version], activeVersionId: version.id }));
     return version;
+  };
+
+  /** «новая версия»: something quite new; the old one stays and can be opened again */
+  const newVersion = () => {
+    const version: CatalogVersion = { id: newId('ver'), label: `v${catalog.versions.length + 1}`, ...currentSettings, createdAt: Date.now() };
+    update((prev) => ({ ...prev, versions: [...prev.versions, version], activeVersionId: version.id }));
+  };
+
+  /** «1» for v1: the number used in take labels (1.1, 1.2…) */
+  const versionNo = (versionId?: string) => {
+    const i = catalog.versions.findIndex((v) => v.id === versionId);
+    return i >= 0 ? i + 1 : 1;
   };
 
   // A new take goes on top; the previous one stays in the item's history (newest first)
@@ -338,10 +418,16 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
         items: prev.items.map((it) => {
           if (it.id !== itemId) return it;
           const old = it.results[versionId];
+          const oldNums = takeNums(old);
+          const seq = Math.max(old?.seq || 0, ...oldNums, 0) + 1;
           const history = old?.src ? [old.src, ...(old.history || [])].slice(0, 12) : old?.history || [];
+          const nums = [seq, ...(old?.src ? oldNums : oldNums.slice(1))].slice(0, history.length + 1);
           return {
             ...it,
-            results: { ...it.results, [versionId]: { ...old, src, history, status: 'done', error: undefined, updatedAt: Date.now() } },
+            results: {
+              ...it.results,
+              [versionId]: { ...old, src, history, nums, seq, status: 'done', error: undefined, approved: false, updatedAt: Date.now() },
+            },
           };
         }),
       }));
@@ -364,6 +450,13 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
 
     const version = ensureVersion();
     const refs = catalog.refs;
+    const samples = catalog.samples || [];
+    // the first ★ photo of another item keeps scale and framing the same across the series
+    const approvedOf = (itemId: string) => {
+      if (!catalog.matchApproved) return undefined;
+      const other = catalog.items.find((it) => it.id !== itemId && it.results[version.id]?.approved && it.results[version.id]?.src);
+      return other?.results[version.id]?.src;
+    };
     const items = (fresh || catalog.items).filter((it) => itemIds.includes(it.id));
     const queue = [...items];
 
@@ -371,14 +464,14 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
     setIsRunning(true);
     setNotice(null);
     setProgress({ done: 0, total: items.length });
-    items.forEach((it) => setResult(it.id, version.id, { status: 'running', error: undefined, approved: false }));
+    items.forEach((it) => setResult(it.id, version.id, { status: 'running', error: undefined }));
 
     let failed = 0;
     const worker = async () => {
       while (queue.length > 0 && !stopRef.current) {
         const item = queue.shift()!;
         try {
-          const src = await withRetry(() => generateCatalogShot(item, version, refs));
+          const src = await withRetry(() => generateCatalogShot(item, version, refs, { samples, approvedShot: approvedOf(item.id) }));
           pushTake(item.id, version.id, src);
         } catch (err) {
           failed++;
@@ -400,7 +493,9 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
         items: prev.items.map((it) => {
           if (!leftover.has(it.id)) return it;
           const results = { ...it.results };
-          delete results[version.id];
+          const r = results[version.id];
+          if (r?.src) results[version.id] = { ...r, status: 'done' };
+          else delete results[version.id];
           return { ...it, results };
         }),
       }));
@@ -510,26 +605,77 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
         const r = it.results[activeVersion.id];
         if (!r?.src) return it;
         const stack = [r.src, ...(r.history || [])];
+        const nums = takeNums(r);
         const chosen = stack[idx];
         if (!chosen) return it;
         const rest = stack.filter((_, i) => i !== idx);
+        const restNums = nums.filter((_, i) => i !== idx);
         const approved = idx === 0 ? !r.approved : true;
-        return { ...it, results: { ...it.results, [activeVersion.id]: { ...r, src: chosen, history: rest, approved, updatedAt: Date.now() } } };
+        return {
+          ...it,
+          results: {
+            ...it.results,
+            [activeVersion.id]: { ...r, src: chosen, history: rest, nums: [nums[idx], ...restNums], approved, updatedAt: Date.now() },
+          },
+        };
       }),
     }));
     setAfterIdx(0);
   };
 
-  /** The take being shown becomes the new source («до»); the old source goes up its stack; then a new take is made */
+  /** Throw away the take being shown (the others stay) */
+  const deleteTake = (itemId: string, idx: number) => {
+    if (!activeVersion) return;
+    update((prev) => ({
+      ...prev,
+      items: prev.items.map((it) => {
+        if (it.id !== itemId) return it;
+        const r = it.results[activeVersion.id];
+        if (!r?.src) return it;
+        const stack = [r.src, ...(r.history || [])];
+        const nums = takeNums(r);
+        const rest = stack.filter((_, i) => i !== idx);
+        const restNums = nums.filter((_, i) => i !== idx);
+        const results = { ...it.results };
+        if (rest.length === 0) delete results[activeVersion.id];
+        else
+          results[activeVersion.id] = {
+            ...r,
+            src: rest[0],
+            history: rest.slice(1),
+            nums: restNums,
+            approved: idx === 0 ? false : r.approved,
+            updatedAt: Date.now(),
+          };
+        return { ...it, results };
+      }),
+    }));
+    setAfterIdx((i) => Math.max(0, i - (idx <= i ? 1 : 0)));
+  };
+
+  /** «сделать мастером»: the take being shown becomes the source («до»), labelled with its number. Nothing runs by itself:
+   * «обработать» makes the next take from it. The client's original always stays at the bottom of «до». */
   const promoteToSource = (itemId: string, idx: number) => {
     const it = catalog.items.find((i) => i.id === itemId);
     const src = it ? afterStack(it)[idx] : undefined;
     if (!it || !src) return;
-    const updated: CatalogItem = { ...it, original: src, originalHistory: [it.original, ...(it.originalHistory || [])].slice(0, 12) };
+    const label = takeLabel(it, idx);
+    const updated: CatalogItem = {
+      ...it,
+      original: src,
+      originalHistory: keepWithLast([it.original, ...(it.originalHistory || [])], 12),
+      sourceLabels: keepWithLast([label, ...sourceLabels(it)], 13),
+    };
     update((prev) => ({ ...prev, items: prev.items.map((x) => (x.id === itemId ? updated : x)) }));
     setBeforeIdx(0);
-    setAfterIdx(0);
-    run([itemId], catalog.items.map((x) => (x.id === itemId ? updated : x)));
+    setNotice({ kind: 'info', text: `${label} теперь мастер («до»). «Обработать» сделает из него новый дубль.` });
+  };
+
+  /** Label of a take in the active version: «1.3» */
+  const takeLabel = (it: CatalogItem, idx: number) => {
+    const r = activeVersion ? it.results[activeVersion.id] : undefined;
+    const n = takeNums(r)[idx];
+    return n ? `${versionNo(activeVersion?.id)}.${n}` : '—';
   };
 
   /** Go back to an earlier source */
@@ -539,9 +685,19 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
       items: prev.items.map((it) => {
         if (it.id !== itemId) return it;
         const stack = [it.original, ...(it.originalHistory || [])];
+        const labels = sourceLabels(it);
         const chosen = stack[idx];
         if (!chosen) return it;
-        return { ...it, original: chosen, originalHistory: stack.filter((_, i) => i !== idx) };
+        // the client's original stays at the bottom even when it is used again
+        if (idx === stack.length - 1) {
+          return { ...it, original: chosen, originalHistory: stack.slice(0, -1).concat(chosen), sourceLabels: [labels[idx], ...labels.slice(0, -1), labels[idx]].slice(0, stack.length + 1) };
+        }
+        return {
+          ...it,
+          original: chosen,
+          originalHistory: stack.filter((_, i) => i !== idx),
+          sourceLabels: [labels[idx], ...labels.filter((_, i) => i !== idx)],
+        };
       }),
     }));
     setBeforeIdx(0);
@@ -622,7 +778,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
   // Keyboard in compare view
   const compareIndex = compareId ? catalog.items.findIndex((i) => i.id === compareId) : -1;
   useEffect(() => {
-    if (!compareId) return;
+    if (!compareId || !isOpen) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
@@ -634,7 +790,8 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         e.preventDefault();
         const step = e.key === 'ArrowDown' ? 1 : -1;
-        if (e.shiftKey) setBeforeIdx((i) => Math.max(0, Math.min(beforeStack(it).length - 1, i + step)));
+        const side = e.shiftKey ? (activeSide === 'after' ? 'before' : 'after') : activeSide;
+        if (side === 'before') setBeforeIdx((i) => Math.max(0, Math.min(beforeStack(it).length - 1, i + step)));
         else setAfterIdx((i) => Math.max(0, Math.min(afterStack(it).length - 1, i + step)));
       }
       if (e.key.toLowerCase() === 'a' || e.key === 'ф' || e.key === 'Ф') chooseTake(compareId, afterIdx);
@@ -642,12 +799,12 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [compareId, compareIndex, catalog.items, activeVersion, afterIdx]);
+  }, [compareId, compareIndex, catalog.items, activeVersion, afterIdx, activeSide, isOpen]);
 
   if (!isOpen) return null;
 
   const errorIds = catalog.items.filter((it) => resultOf(it)?.status === 'error').map((it) => it.id);
-  const pendingIds = catalog.items.filter((it) => !resultOf(it) || settingsChanged).map((it) => it.id);
+  const pendingIds = catalog.items.filter((it) => !resultOf(it)?.src).map((it) => it.id);
   const selectedList = catalog.items.filter((it) => selectedIds.has(it.id)).map((it) => it.id);
   const firstForTest = selectedList[0] || catalog.items[0]?.id;
   const compareItem = compareIndex >= 0 ? catalog.items[compareIndex] : null;
@@ -720,6 +877,61 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                 ]}
               />
             )}
+
+            {/* Series: what must look the same in every photo */}
+            <div className="space-y-1 pt-1">
+              <div className="flex items-center gap-1.5 text-[12px]">
+                <span>Одинаковое в серии</span>
+                <Info>
+                  Образцы того, что должно выглядеть одинаково на всех фото: тот же пауч, этикетка, логотип. Подпиши, что это («пауч белый
+                  матовый», «логотип — бери отсюда, тут чётче»). Размер товара относительно других — в полном экране («размер в серии»).
+                </Info>
+              </div>
+              {(catalog.samples || []).map((sm) => (
+                <div key={sm.id} className="flex items-center gap-1">
+                  <img src={sm.src} alt={sm.name} className="w-12 h-12 object-cover bg-[var(--soft)] shrink-0" />
+                  <input
+                    value={sm.role}
+                    onChange={(e) => setSampleRole(sm.id, e.target.value)}
+                    placeholder="что это: пауч, логотип, этикетка…"
+                    className="flex-1 min-w-0 h-7 px-1 text-[12px] select-text"
+                  />
+                  <button
+                    onClick={() => update((prev) => ({ ...prev, samples: (prev.samples || []).filter((x) => x.id !== sm.id) }))}
+                    className="ofst-x"
+                    aria-label="Убрать образец"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {(catalog.samples?.length || 0) < 3 && (
+                <button onClick={() => setSampleMenuOpen((v) => !v)} className={`ofst-cell !h-7 -ml-2 ${sampleMenuOpen ? 'is-on' : ''}`}>
+                  + образец
+                </button>
+              )}
+              {sampleMenuOpen && (
+                <SourceList
+                  onDone={() => setSampleMenuOpen(false)}
+                  options={[
+                    { label: 'с доски', note: `${boardCards.length} фото`, disabled: boardCards.length === 0, onClick: () => setSamplePicker('board') },
+                    ...(selectedCards.length > 0
+                      ? [{ label: `выделенные на доске (${selectedCards.length})`, onClick: () => addSamples(selectedCards.map((c) => ({ name: c.name || 'образец', src: c.src }))) }]
+                      : []),
+                    { label: 'из позиций', disabled: !products.some((p) => p.photoDataUrl), onClick: () => setSamplePicker('products') },
+                    { label: 'с компьютера', onClick: () => sampleInputRef.current?.click() },
+                  ]}
+                />
+              )}
+              <label className="flex items-center gap-1.5 text-[12px] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(catalog.matchApproved)}
+                  onChange={(e) => update((prev) => ({ ...prev, matchApproved: e.target.checked }))}
+                />
+                масштаб и кадр — как у первого ★ фото
+              </label>
+            </div>
 
             <div className="grid grid-cols-2 gap-0.5">
               <label className="block">
@@ -858,11 +1070,41 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
           {/* Step 3 */}
           <section className="space-y-1">
             <StepTitle n={3} title="Прогон" hint="сначала тест на одном" />
-            {settingsChanged && catalog.versions.length > 0 && (
-              <p className="text-[12px] bg-[var(--marker)] px-1">
-                Настройки изменились: следующий прогон станет версией v{catalog.versions.length + 1}, старая сохранится.
-              </p>
-            )}
+            {/* Versions: one by default; a new one only by hand, for something quite different */}
+            <div className="flex items-center flex-wrap gap-1 text-[12px]">
+              <span className="text-[var(--grey)]">версия</span>
+              {catalog.versions.length <= 1 ? (
+                <span className="tabular-nums">{versionNo(activeVersion?.id)}</span>
+              ) : (
+                <select
+                  value={catalog.activeVersionId}
+                  onChange={(e) => {
+                    const v = catalog.versions.find((x) => x.id === e.target.value);
+                    if (v) applyVersionSettings(v);
+                  }}
+                  className="h-6 px-1 text-[12px]"
+                >
+                  {catalog.versions.map((v, i) => (
+                    <option key={v.id} value={v.id}>
+                      {i + 1} · {CATEGORY_LABELS[v.category]} · {v.aspectRatio}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                onClick={() => {
+                  if (window.confirm('Новая версия — для чего-то совсем другого. Текущие кадры останутся в своей версии. Создать?')) newVersion();
+                }}
+                disabled={isRunning || catalog.versions.length === 0}
+                className="underline text-[var(--grey)] hover:text-[var(--fg)] disabled:opacity-40"
+              >
+                + новая версия
+              </button>
+              <Info>
+                Все прогоны идут в одну версию: каждый новый кадр — дубль 1.1, 1.2, 1.3… и ничего не пропадает. Новую версию (2.1, 2.2…)
+                делай только если хочешь что-то совсем другое; старая остаётся и открывается в этом же списке.
+              </Info>
+            </div>
             {isRunning ? (
               <div>
                 <div className="h-1 bg-[var(--soft)]">
@@ -894,9 +1136,7 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                   disabled={catalog.items.length === 0 || (selectedList.length === 0 && pendingIds.length === 0)}
                   className="ofst-cell ofst-cell--primary !h-9"
                 >
-                  {selectedList.length
-                    ? `Прогнать выбранные (${selectedList.length})`
-                    : `Прогнать ${settingsChanged ? 'все' : 'оставшиеся'} (${pendingIds.length})`}
+                  {selectedList.length ? `Прогнать выбранные (${selectedList.length})` : `Прогнать новые (${pendingIds.length})`}
                 </button>
                 {errorIds.length > 0 && (
                   <button onClick={() => run(errorIds)} className="ofst-cell !h-9 bg-[var(--marker)]">
@@ -915,22 +1155,10 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
         <main className="flex-1 min-w-0 flex flex-col lg:overflow-hidden p-2 lg:pl-0">
           <div className="shrink-0 flex flex-wrap items-center justify-between">
             <div className="flex items-center flex-wrap">
-              {catalog.versions.length === 0 ? (
-                <span className="text-[13px] text-[var(--grey)]">Версий пока нет: запусти тест.</span>
+              {!activeVersion ? (
+                <span className="text-[13px] text-[var(--grey)]">Ещё не прогоняли: начни с теста на одном фото.</span>
               ) : (
-                catalog.versions.map((v) => (
-                  <button
-                    key={v.id}
-                    onClick={() => applyVersionSettings(v)}
-                    title={`${CATEGORY_LABELS[v.category]} · ${v.aspectRatio} · t=${v.temperature}`}
-                    className={`ofst-cell ${v.id === catalog.activeVersionId ? 'is-on' : ''}`}
-                  >
-                    {v.label}
-                  </button>
-                ))
-              )}
-              {activeVersion && (
-                <span className="text-[12px] text-[var(--grey)] ml-2 tabular-nums">
+                <span className="text-[12px] text-[var(--grey)] tabular-nums">
                   готово {stats.done}/{catalog.items.length}
                   {stats.approved > 0 && <> · одобрено {stats.approved}</>}
                   {stats.errors > 0 && <span className="text-[var(--fg)] bg-[var(--marker)] px-0.5"> · ошибок {stats.errors}</span>}
@@ -948,6 +1176,11 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                   className="ofst-cell ofst-cell--muted"
                 >
                   {selectedIds.size === catalog.items.length ? 'Снять выбор' : 'Выбрать все'}
+                </button>
+              )}
+              {duplicateGroups.length > 0 && (
+                <button onClick={() => setShowDuplicates(true)} className="ofst-cell bg-[var(--marker)]" title="Одинаковые фото или названия">
+                  дубликаты ({duplicateGroups.reduce((n, g) => n + g.length - 1, 0)})
                 </button>
               )}
               {selectedIds.size > 0 && (
@@ -999,15 +1232,33 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
                   const r = resultOf(item);
                   const selected = selectedIds.has(item.id);
                   const takes = (r?.history?.length || 0) + (r?.src ? 1 : 0);
+                  // Nothing in this version yet: show the latest take from another version, so the grid never goes blank
+                  const otherVersion = !r?.src
+                    ? catalog.versions
+                        .map((v, vi) => ({ r: item.results[v.id], no: vi + 1 }))
+                        .filter((x) => x.r?.src)
+                        .pop()
+                    : undefined;
+                  const shownSrc = r?.src || otherVersion?.r?.src;
+                  const shownLabel = r?.src ? takeLabel(item, 0) : otherVersion ? `${otherVersion.no}.${takeNums(otherVersion.r)[0] || 1}` : '';
                   return (
                     <div key={item.id} className="relative group/tile">
                       <div className="grid grid-cols-2 gap-0">
-                        <Thumb src={item.original} label="до" ratio={`${arW} / ${arH}`} onOpen={() => setCompareId(item.id)} />
+                        <Thumb src={item.original} label={sourceLabels(item)[0]} ratio={`${arW} / ${arH}`} onOpen={() => setCompareId(item.id)} />
                         <div className="relative bg-[var(--soft)]" style={{ aspectRatio: `${arW} / ${arH}` }}>
-                          {r?.src && r.status !== 'running' ? (
-                            <Thumb src={r.src} label="после" ratio={`${arW} / ${arH}`} onOpen={() => setCompareId(item.id)} />
-                          ) : r?.status === 'running' ? (
-                            <div className="absolute inset-0 flex items-center justify-center text-[12px] text-[var(--grey)]">генерация…</div>
+                          {shownSrc ? (
+                            <div className={r?.src ? '' : 'opacity-50'}>
+                              <Thumb src={shownSrc} label={shownLabel} ratio={`${arW} / ${arH}`} onOpen={() => setCompareId(item.id)} />
+                            </div>
+                          ) : null}
+                          {r?.status === 'running' ? (
+                            <div className="absolute inset-x-0 top-0 flex items-center justify-center text-[12px] bg-[var(--marker)] h-5">генерация…</div>
+                          ) : shownSrc ? (
+                            r?.status === 'error' ? (
+                              <div className="absolute inset-x-0 top-0 px-1 text-[11px] bg-[var(--marker)] truncate select-text" title={r.error}>
+                                ошибка: {r.error}
+                              </div>
+                            ) : null
                           ) : r?.status === 'error' ? (
                             <div className="absolute inset-0 p-1 bg-[var(--marker)] text-[11px] leading-snug line-clamp-6 select-text">{r.error}</div>
                           ) : (
@@ -1087,76 +1338,209 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
             </button>
           </span>
         );
+        const bLabels = sourceLabels(compareItem);
+        const beforeLabel = bLabels[bIdx] || 'оригинал';
+        const afterLabel = shownAfter ? takeLabel(compareItem, aIdx) : '';
+        const chosen = aIdx === 0 && compareResult?.approved;
+        const neverRun = after.length === 0;
+        const busy = (isRunningNow && aIdx === 0) || editingItemId === compareItem.id;
+        const changeMode = (m: 'side' | 'slider') => {
+          setCompareMode(m);
+          try {
+            localStorage.setItem('aips_compare_mode', m);
+          } catch {
+            /* private mode */
+          }
+        };
+        // The divider of the «шторка»: drag anywhere on the frame
+        const dragSplit = (e: React.PointerEvent<HTMLDivElement>) => {
+          const box = e.currentTarget.getBoundingClientRect();
+          const set = (x: number) => setSplit(Math.max(0, Math.min(100, ((x - box.left) / box.width) * 100)));
+          set(e.clientX);
+          const move = (ev: PointerEvent) => set(ev.clientX);
+          const up = () => {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', up);
+          };
+          window.addEventListener('pointermove', move);
+          window.addEventListener('pointerup', up);
+        };
+        const sideHead = (side: 'before' | 'after') => {
+          const on = activeSide === side;
+          return side === 'before' ? (
+            <div className="flex items-center justify-between text-[12px] h-7 gap-1">
+              <button onClick={() => setActiveSide('before')} className={`px-1 h-6 ${on ? 'bg-[var(--marker)]' : 'hover:bg-[var(--soft)]'}`} title="Листать эту сторону: ↑ ↓">
+                до · {beforeLabel}
+              </button>
+              <span className="flex items-center">
+                {bIdx > 0 && (
+                  <button onClick={() => restoreSource(compareItem.id, bIdx)} className="ofst-cell !h-6">
+                    сделать мастером
+                  </button>
+                )}
+                {before.length > 1 && stepper(bIdx, before.length, (n) => { setActiveSide('before'); setBeforeIdx(n); }, 'исходник')}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between text-[12px] h-7 gap-1">
+              <button onClick={() => setActiveSide('after')} className={`px-1 h-6 ${on ? 'bg-[var(--marker)]' : 'hover:bg-[var(--soft)]'}`} title="Листать эту сторону: ↑ ↓">
+                после{afterLabel ? ` · ${afterLabel}` : ''}
+                {chosen ? ' · ★' : ''}
+              </button>
+              <span className="flex items-center flex-wrap justify-end">
+                {shownAfter && (
+                  <button onClick={() => chooseTake(compareItem.id, aIdx)} className={`ofst-cell !h-6 ${chosen ? 'is-on' : ''}`} title="A">
+                    ★ {chosen ? 'выбран' : 'выбрать'}
+                  </button>
+                )}
+                <button
+                  onClick={() => run([compareItem.id])}
+                  disabled={isRunning}
+                  className={`ofst-cell !h-6 ${neverRun ? 'ofst-cell--primary' : ''}`}
+                  title={neverRun ? 'Сделать первый кадр из «до»' : 'Обработать «до» ещё раз: новый дубль ляжет сверху, этот останется'}
+                >
+                  {neverRun ? 'прогнать это фото' : 'обработать ещё'}
+                </button>
+                {shownAfter && (
+                  <button
+                    onClick={() => promoteToSource(compareItem.id, aIdx)}
+                    disabled={isRunning}
+                    className="ofst-cell !h-6"
+                    title="Этот кадр станет мастером («до»). Ничего не запускается: потом «обработать ещё»"
+                  >
+                    ← сделать мастером
+                  </button>
+                )}
+                {shownAfter && (
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Удалить дубль ${afterLabel}?`)) deleteTake(compareItem.id, aIdx);
+                    }}
+                    disabled={busy}
+                    className="ofst-cell ofst-cell--muted !h-6 hover:!bg-[var(--marker)]"
+                  >
+                    удалить
+                  </button>
+                )}
+                {after.length > 1 && stepper(aIdx, after.length, (n) => { setActiveSide('after'); setAfterIdx(n); }, 'дубль')}
+              </span>
+            </div>
+          );
+        };
+        const afterBody = busy ? (
+          <div className="flex-1 flex items-center justify-center bg-[var(--soft)] text-[var(--grey)] text-[13px]">
+            {editingItemId === compareItem.id ? 'правлю…' : 'генерация…'}
+          </div>
+        ) : shownAfter ? (
+          <BigImage src={shownAfter} label="" />
+        ) : (
+          <div className="flex-1 flex flex-col gap-2 items-center justify-center bg-[var(--soft)] text-[var(--grey)] text-[13px] p-4 text-center">
+            <span>{compareResult?.error || 'Это фото ещё не прогоняли'}</span>
+            <button onClick={() => run([compareItem.id])} disabled={isRunning} className="ofst-cell ofst-cell--primary">
+              Прогнать это фото
+            </button>
+          </div>
+        );
         return (
           <div className="fixed inset-0 z-[60] bg-white flex flex-col p-2 gap-1 ofst-fade">
-            <div className="shrink-0 ofst-run">
-              <span className="truncate">
-                {compareIndex + 1}/{catalog.items.length} · {compareItem.name}
+            <div className="shrink-0 flex items-center gap-2 border-b border-[var(--fg)] pb-1">
+              <button onClick={() => setCompareId(null)} className="ofst-cell ofst-cell--primary" title="Выйти из полного экрана (Esc)">
+                ← к сетке
+              </button>
+              <span className="truncate text-[13px] flex-1">
+                <span className="text-[var(--grey)] tabular-nums">
+                  {compareIndex + 1}/{catalog.items.length}
+                </span>{' '}
+                {compareItem.name}
               </span>
-              <span>← → позиции · колесо или ↑ ↓ над половиной — листать · A выбрать</span>
+              <label className="flex items-center gap-1 text-[12px] text-[var(--grey)]" title="Насколько этот товар больше или меньше обычного в серии (100 = как все)">
+                размер в серии
+                <input
+                  type="number"
+                  min={20}
+                  max={300}
+                  step={5}
+                  value={compareItem.size ?? 100}
+                  onChange={(e) => setItemSize(compareItem.id, Math.max(20, Math.min(300, Number(e.target.value) || 100)))}
+                  className="w-14 h-6 px-1 text-[12px] text-[var(--fg)] select-text"
+                />
+                %
+              </label>
+              <span className="hidden lg:inline text-[11px] text-[var(--grey)]">
+                ← → товары · клик по стороне, потом ↑ ↓ или колесо — листать её · A выбрать · Esc выйти
+              </span>
+              <span className="flex">
+                <button onClick={() => changeMode('side')} className={`ofst-cell !h-7 ${compareMode === 'side' ? 'is-on' : 'ofst-cell--muted'}`}>
+                  рядом
+                </button>
+                <button onClick={() => changeMode('slider')} className={`ofst-cell !h-7 ${compareMode === 'slider' ? 'is-on' : 'ofst-cell--muted'}`}>
+                  шторка
+                </button>
+              </span>
               <button onClick={() => setCompareId(null)} className="ofst-x" aria-label="Закрыть">
                 ×
               </button>
             </div>
-            <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 gap-0.5 overflow-auto md:overflow-hidden">
-              {/* до */}
-              <div className="flex flex-col min-h-[40vh] md:min-h-0" onWheel={flipOnWheel(before.length, setBeforeIdx)}>
-                <div className="flex items-center justify-between text-[12px] h-7">
-                  <span>до{bIdx > 0 ? ' · прежний исходник' : ''}</span>
-                  <span className="flex items-center">
-                    {bIdx > 0 && (
-                      <button onClick={() => restoreSource(compareItem.id, bIdx)} className="ofst-cell !h-6">
-                        вернуть этот исходник
-                      </button>
-                    )}
-                    {before.length > 1 && stepper(bIdx, before.length, setBeforeIdx, 'исходник')}
-                  </span>
+            {compareMode === 'side' ? (
+              <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 gap-0.5 overflow-auto md:overflow-hidden">
+                {/* до */}
+                <div
+                  className={`flex flex-col min-h-[40vh] md:min-h-0 ${activeSide === 'before' ? '' : ''}`}
+                  onWheel={flipOnWheel(before.length, setBeforeIdx)}
+                  onMouseDown={() => setActiveSide('before')}
+                >
+                  {sideHead('before')}
+                  <BigImage src={before[bIdx]} label="" />
                 </div>
-                <BigImage src={before[bIdx]} label="" />
+                {/* после */}
+                <div className="flex flex-col min-h-[40vh] md:min-h-0" onWheel={flipOnWheel(after.length, setAfterIdx)} onMouseDown={() => setActiveSide('after')}>
+                  {sideHead('after')}
+                  {afterBody}
+                </div>
               </div>
-              {/* после */}
-              <div className="flex flex-col min-h-[40vh] md:min-h-0" onWheel={flipOnWheel(after.length, setAfterIdx)}>
-                <div className="flex items-center justify-between text-[12px] h-7">
-                  <span>
-                    после · {activeVersion?.label}
-                    {aIdx === 0 && compareResult?.approved ? ' · ★ выбран' : ''}
-                    {aIdx > 0 ? ' · прежний дубль' : ''}
-                  </span>
-                  <span className="flex items-center">
-                    {shownAfter && (
-                      <button onClick={() => chooseTake(compareItem.id, aIdx)} className={`ofst-cell !h-6 ${aIdx === 0 && compareResult?.approved ? 'is-on' : ''}`} title="A">
-                        ★ {aIdx === 0 && compareResult?.approved ? 'выбран' : 'выбрать'}
-                      </button>
-                    )}
-                    <button onClick={() => run([compareItem.id])} disabled={isRunning} className="ofst-cell !h-6" title="Новый дубль ляжет сверху, этот останется в стопке">
-                      ещё дубль
-                    </button>
-                    {shownAfter && (
-                      <button
-                        onClick={() => promoteToSource(compareItem.id, aIdx)}
-                        disabled={isRunning}
-                        className="ofst-cell !h-6"
-                        title="Этот кадр станет исходником («до»), старый исходник уйдёт в стопку, и сразу сделается новый дубль"
-                      >
-                        ← в «до» и заново
-                      </button>
-                    )}
-                    {after.length > 1 && stepper(aIdx, after.length, setAfterIdx, 'дубль')}
-                  </span>
+            ) : (
+              <div className="flex-1 min-h-0 flex flex-col">
+                <div className="grid grid-cols-2 gap-2">
+                  {sideHead('before')}
+                  {sideHead('after')}
                 </div>
-                {(isRunningNow && aIdx === 0) || editingItemId === compareItem.id ? (
-                  <div className="flex-1 flex items-center justify-center bg-[var(--soft)] text-[var(--grey)] text-[13px]">
-                    {editingItemId === compareItem.id ? 'правлю…' : 'генерация…'}
+                {shownAfter && !busy ? (
+                  <div
+                    className="relative flex-1 min-h-[40vh] bg-[var(--soft)] overflow-hidden cursor-ew-resize touch-none"
+                    onPointerDown={dragSplit}
+                    onWheel={flipOnWheel(activeSide === 'before' ? before.length : after.length, activeSide === 'before' ? setBeforeIdx : setAfterIdx)}
+                  >
+                    <img src={before[bIdx]} alt="до" className="absolute inset-0 w-full h-full object-contain pointer-events-none" draggable={false} />
+                    <img
+                      src={shownAfter}
+                      alt="после"
+                      className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+                      style={{ clipPath: `inset(0 0 0 ${split}%)` }}
+                      draggable={false}
+                    />
+                    <div className="absolute top-0 bottom-0 w-px bg-[var(--fg)] pointer-events-none" style={{ left: `${split}%` }}>
+                      <span className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 bg-[var(--fg)] text-white text-[11px] px-1 whitespace-nowrap">◂ ▸</span>
+                    </div>
+                    <span className="absolute left-0 bottom-0 bg-white px-1 text-[11px]">до · {beforeLabel}</span>
+                    <span className="absolute right-0 bottom-0 bg-[var(--fg)] text-white px-1 text-[11px]">после · {afterLabel}</span>
+                    <span className="absolute left-1/2 -translate-x-1/2 bottom-0 flex bg-white text-[11px]">
+                      {[33, 50, 67].map((v) => (
+                        <button
+                          key={v}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={() => setSplit(v)}
+                          className={`px-1 ${Math.round(split) === v ? 'bg-[var(--fg)] text-white' : 'hover:bg-[var(--soft)]'}`}
+                        >
+                          {v === 33 ? '⅓' : v === 50 ? '½' : '⅔'}
+                        </button>
+                      ))}
+                    </span>
                   </div>
-                ) : shownAfter ? (
-                  <BigImage src={shownAfter} label="" />
                 ) : (
-                  <div className="flex-1 flex items-center justify-center bg-[var(--soft)] text-[var(--grey)] text-[13px] p-4 text-center">
-                    {compareResult?.error || 'Ещё не прогнано'}
-                  </div>
+                  afterBody
                 )}
               </div>
-            </div>
+            )}
             {/* Edit the shown take by words; quick fixes are the «Исходник» master prompts */}
             {shownAfter && (
               <form
@@ -1217,8 +1601,9 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
 
       {/* Pick style references from the board or from positions */}
       {refPicker && (
-        <SrcPicker
+        <PickPhotos
           title={refPicker === 'board' ? 'Эталон с доски' : 'Эталон из позиций'}
+          confirmLabel="Взять эталоном"
           max={3 - catalog.refs.length}
           items={
             refPicker === 'board'
@@ -1234,9 +1619,11 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
       )}
 
       {itemsFromBoard && (
-        <SrcPicker
+        <PickPhotos
           title="Фото товаров с доски"
-          max={500}
+          confirmLabel="Добавить"
+          max={2000}
+          already={alreadyInCatalog(boardCards.map((c) => ({ id: c.id, name: c.name || '' })))}
           items={boardCards.map((c) => ({ id: c.id, name: c.name || 'фото', src: c.src }))}
           onCancel={() => setItemsFromBoard(false)}
           onConfirm={(picked) => {
@@ -1246,10 +1633,69 @@ export const CatalogStudio: React.FC<CatalogStudioProps> = ({
         />
       )}
 
+      {showDuplicates && (
+        <DuplicatesDialog
+          groups={duplicateGroups}
+          labelOf={(it) => {
+            const r = resultOf(it);
+            const n = (r?.history?.length || 0) + (r?.src ? 1 : 0);
+            return n ? `дублей ${n}${r?.approved ? ' · ★' : ''}` : 'не прогнано';
+          }}
+          onCancel={() => setShowDuplicates(false)}
+          onConfirm={(removeIds) => {
+            setShowDuplicates(false);
+            const rm = new Set(removeIds);
+            update((prev) => ({ ...prev, items: prev.items.filter((i) => !rm.has(i.id)) }));
+            setNotice({ kind: 'info', text: `Убрано дубликатов: ${removeIds.length}.` });
+          }}
+        />
+      )}
+
       {/* Product picker */}
       {showProductPicker && (
-        <ProductPicker products={products} onCancel={() => setShowProductPicker(false)} onConfirm={addFromProducts} />
+        <PickPhotos
+          title="Фото товаров из позиций"
+          confirmLabel="Добавить"
+          max={2000}
+          already={alreadyInCatalog(products.map((p) => ({ id: p.id, name: p.name })))}
+          items={products.filter((p) => p.photoDataUrl).map((p) => ({ id: p.id, name: p.name, src: p.photoDataUrl }))}
+          onCancel={() => setShowProductPicker(false)}
+          onConfirm={(picked) => {
+            setShowProductPicker(false);
+            addItemsFromSrcs(picked);
+          }}
+        />
       )}
+
+      {samplePicker && (
+        <PickPhotos
+          title={samplePicker === 'board' ? 'Образец с доски' : 'Образец из позиций'}
+          confirmLabel="Взять образцом"
+          max={3 - (catalog.samples?.length || 0)}
+          items={
+            samplePicker === 'board'
+              ? boardCards.map((c) => ({ id: c.id, name: c.name || 'фото', src: c.src }))
+              : products.filter((p) => p.photoDataUrl).map((p) => ({ id: p.id, name: p.name, src: p.photoDataUrl }))
+          }
+          onCancel={() => setSamplePicker(null)}
+          onConfirm={(picked) => {
+            setSamplePicker(null);
+            addSamples(picked);
+          }}
+        />
+      )}
+      <input
+        ref={sampleInputRef}
+        type="file"
+        accept="image/*,.heic,.heif"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files: File[] = e.target.files ? Array.from(e.target.files) : [];
+          e.target.value = '';
+          addSampleFiles(files);
+        }}
+      />
 
       {/* Hidden inputs */}
       <input
@@ -1394,45 +1840,72 @@ function IconBtn({
 }
 
 /** Choose up to `max` photos (board cards or positions) */
-function SrcPicker({
+/** Pick photos from the board or the positions. Ones already in the catalog are marked; select all / only new / none. */
+function PickPhotos({
   title,
   items,
   max,
+  already,
+  confirmLabel,
   onCancel,
   onConfirm,
 }: {
   title: string;
   items: { id: string; name: string; src: string }[];
   max: number;
+  already?: Set<string>;
+  confirmLabel: string;
   onCancel: () => void;
-  onConfirm: (picked: { name: string; src: string }[]) => void;
+  onConfirm: (picked: { id: string; name: string; src: string }[]) => void;
 }) {
-  const [picked, setPicked] = useState<string[]>([]);
+  const fresh = items.filter((it) => !already?.has(it.id));
+  const [picked, setPicked] = useState<string[]>(() => (max >= items.length ? fresh.map((it) => it.id) : []));
+  const many = max > 3;
+  const dupCount = items.length - fresh.length;
   return (
     <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-2 ofst-fade" onClick={onCancel}>
       <div className="bg-white max-w-3xl w-full max-h-[86vh] flex flex-col p-2 gap-1" onClick={(e) => e.stopPropagation()}>
         <div className="ofst-run">
           <span>{title}</span>
           <span>
-            выбрано {picked.length} из {max}
+            выбрано {picked.length}
+            {many ? ` из ${items.length}` : ` из ${max}`}
           </span>
         </div>
+        {many && (
+          <div className="flex flex-wrap items-center -ml-2 text-[12px]">
+            <button onClick={() => setPicked(items.slice(0, max).map((it) => it.id))} className="ofst-cell !h-7">
+              выбрать все
+            </button>
+            {dupCount > 0 && (
+              <button onClick={() => setPicked(fresh.slice(0, max).map((it) => it.id))} className="ofst-cell !h-7">
+                только новые ({fresh.length})
+              </button>
+            )}
+            <button onClick={() => setPicked([])} className="ofst-cell ofst-cell--muted !h-7">
+              снять все
+            </button>
+            {dupCount > 0 && <span className="text-[var(--grey)] px-2">уже в каталоге: {dupCount} — помечены и не выбраны</span>}
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto custom-scrollbar grid grid-cols-3 sm:grid-cols-5 gap-0">
           {items.map((it) => {
             const on = picked.includes(it.id);
+            const dup = already?.has(it.id);
             return (
               <button
                 key={it.id}
                 onClick={() =>
                   setPicked((prev) => (on ? prev.filter((x) => x !== it.id) : prev.length < max ? [...prev, it.id] : prev))
                 }
-                className="relative text-left"
+                className={`relative text-left ${on ? '' : 'opacity-60 hover:opacity-100'}`}
               >
                 <div className="aspect-square bg-[var(--soft)]">
-                  <img src={it.src} alt={it.name} className="w-full h-full object-cover" />
+                  {it.src && <img src={it.src} alt={it.name} className="w-full h-full object-cover" />}
                 </div>
+                {dup && <span className="absolute left-0 top-0 px-1 text-[10px] bg-[var(--fg)] text-white">уже в каталоге</span>}
                 <div className={`absolute left-0 right-0 bottom-0 px-1 text-[11px] truncate ${on ? 'bg-[var(--marker)]' : 'bg-white/85'}`}>
-                  {on ? `${picked.indexOf(it.id) + 1} · ` : ''}
+                  {on && !many ? `${picked.indexOf(it.id) + 1} · ` : ''}
                   {it.name}
                 </div>
               </button>
@@ -1444,11 +1917,11 @@ function SrcPicker({
             Отмена
           </button>
           <button
-            onClick={() => onConfirm(items.filter((it) => picked.includes(it.id)).map((it) => ({ name: it.name, src: it.src })))}
+            onClick={() => onConfirm(items.filter((it) => picked.includes(it.id)))}
             disabled={picked.length === 0}
             className="ofst-cell ofst-cell--primary"
           >
-            Взять эталоном {picked.length || ''}
+            {confirmLabel} {picked.length || ''}
           </button>
         </div>
       </div>
@@ -1456,54 +1929,79 @@ function SrcPicker({
   );
 }
 
-function ProductPicker({
-  products,
+/** Duplicates: in each group tick what to remove; by default the one with the most work stays */
+function DuplicatesDialog({
+  groups,
+  labelOf,
   onCancel,
   onConfirm,
 }: {
-  products: ProductItem[];
+  groups: CatalogItem[][];
+  labelOf: (it: CatalogItem) => string;
   onCancel: () => void;
-  onConfirm: (picked: ProductItem[]) => void;
+  onConfirm: (removeIds: string[]) => void;
 }) {
-  const [picked, setPicked] = useState<Set<string>>(new Set(products.map((p) => p.id)));
+  const score = (it: CatalogItem) =>
+    Object.values(it.results).reduce((n, r) => n + (r.src ? 1 + (r.history?.length || 0) : 0) + (r.approved ? 100 : 0), 0);
+  const [remove, setRemove] = useState<Set<string>>(() => {
+    const out = new Set<string>();
+    groups.forEach((g) => {
+      const keep = [...g].sort((a, b) => score(b) - score(a))[0];
+      g.forEach((it) => it.id !== keep.id && out.add(it.id));
+    });
+    return out;
+  });
+  const toggle = (id: string) =>
+    setRemove((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
   return (
-    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-2" onClick={onCancel}>
-      <div className="bg-white max-w-lg w-full max-h-[80vh] flex flex-col p-2 gap-1" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-2 ofst-fade" onClick={onCancel}>
+      <div className="bg-white max-w-3xl w-full max-h-[86vh] flex flex-col p-2 gap-1" onClick={(e) => e.stopPropagation()}>
         <div className="ofst-run">
-          <span>Добавить из продуктов</span>
-          <span>{picked.size} из {products.length}</span>
+          <span>Дубликаты</span>
+          <span>групп {groups.length} · убрать {remove.size}</span>
         </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar grid grid-cols-3 sm:grid-cols-4 gap-x-0.5 gap-y-1">
-          {products.map((p) => (
-            <button
-              key={p.id}
-              onClick={() =>
-                setPicked((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(p.id)) next.delete(p.id);
-                  else next.add(p.id);
-                  return next;
-                })
-              }
-              className={`text-left ${picked.has(p.id) ? '' : 'opacity-40'}`}
-            >
-              <div className="aspect-square bg-[var(--soft)]">
-                {p.photoDataUrl && <img src={p.photoDataUrl} alt={p.name} className="w-full h-full object-cover" />}
+        <p className="text-[12px] text-[var(--grey)]">
+          Одинаковые фото, одна и та же позиция или одинаковое название. Отмеченные жёлтым уберутся; по умолчанию остаётся то, где больше
+          работы (дубли, ★). Клик по фото — переключить.
+        </p>
+        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
+          {groups.map((g, gi) => (
+            <div key={gi}>
+              <div className="ofst-run mb-0.5">
+                <span>{g[0].name}</span>
+                <span>{g.length}</span>
               </div>
-              <div className="pt-0.5 text-[11px] truncate">{p.name}</div>
-            </button>
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-0.5">
+                {g.map((it) => {
+                  const rm = remove.has(it.id);
+                  return (
+                    <button key={it.id} onClick={() => toggle(it.id)} className="relative text-left" title={rm ? 'Уберётся' : 'Останется'}>
+                      <div className={`aspect-square bg-[var(--soft)] ${rm ? 'opacity-40' : ''}`}>
+                        <img src={it.original} alt={it.name} className="w-full h-full object-cover" />
+                      </div>
+                      <span className={`absolute left-0 top-0 px-1 text-[10px] ${rm ? 'bg-[var(--marker)]' : 'bg-[var(--fg)] text-white'}`}>
+                        {rm ? 'убрать' : 'оставить'}
+                      </span>
+                      <div className="text-[11px] truncate pt-0.5">{it.name}</div>
+                      <div className="text-[10px] text-[var(--grey)]">{labelOf(it)}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           ))}
         </div>
         <div className="flex justify-end">
           <button onClick={onCancel} className="ofst-cell ofst-cell--muted">
             Отмена
           </button>
-          <button
-            onClick={() => onConfirm(products.filter((p) => picked.has(p.id)))}
-            disabled={picked.size === 0}
-            className="ofst-cell ofst-cell--primary"
-          >
-            Добавить {picked.size}
+          <button onClick={() => onConfirm([...remove])} disabled={remove.size === 0} className="ofst-cell ofst-cell--primary">
+            Убрать {remove.size}
           </button>
         </div>
       </div>

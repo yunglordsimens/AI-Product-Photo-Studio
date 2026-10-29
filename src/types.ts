@@ -37,6 +37,8 @@ export interface Card {
   meta?: GenerationMeta;
   /** What to take from this photo when it is used as a reference (see REFERENCE_ROLES) */
   takes?: string[];
+  /** A photo put on the board from a position cell: keeps the link to its full-size original */
+  fromSlot?: { productId: string; slot: number };
 }
 
 export interface Connection {
@@ -64,6 +66,8 @@ export interface ProductItem {
   photoDataUrl: string;
   category?: string; // e.g. the subfolder it came from ("Káva", "Poke Bowls")
   sku?: string; // shop id / code, e.g. from a folder "785756834 - Name" or the id column of a CSV
+  /** What each photo shows, by cell: "-1" = the original, "0".. = the next columns (общее, бок, деталь, в действии…) */
+  angles?: Record<string, string>;
   price?: string;
   variants?: (string | null)[]; // new photos for this position, one per column (data URLs)
   finalIndex?: number; // which photo is the final one: -1 = original, 0.. = variant column
@@ -117,6 +121,10 @@ export interface BoardMatrix {
   cols: string[];
   /** Which axis lists the products */
   productsAlong: 'rows' | 'cols';
+  /** Made from the positions: each product line is tied to a position, «→ в позиции» updates it instead of adding a new one */
+  linked?: boolean;
+  /** Position id per product line (same order as the product axis), null for a line added by hand */
+  lineProductIds?: (string | null)[];
 }
 
 export interface Project {
