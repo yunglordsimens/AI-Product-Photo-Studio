@@ -2,11 +2,12 @@ import React from 'react';
 import { StorageInfo } from '../types';
 
 /** Names of the top-bar tools, as shown in Меню → «Кнопки сверху» */
-export type StudioView = 'board' | 'catalog' | 'video';
+export type StudioView = 'board' | 'catalog' | 'video' | 'packaging';
 const VIEWS: { id: StudioView; label: string }[] = [
   { id: 'board', label: 'Доска' },
   { id: 'catalog', label: 'Каталог' },
   { id: 'video', label: 'Видео' },
+  { id: 'packaging', label: 'Упаковка' },
 ];
 /** Board-only tools are hidden on the other tabs */
 const ALWAYS_TOOLS = new Set(['products', 'prompts']);

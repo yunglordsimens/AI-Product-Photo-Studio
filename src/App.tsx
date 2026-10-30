@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Card, MasterPrompt, ProductItem, Project, StorageInfo } from './types';
+import { useCallback, useState } from 'react';
+import { Card, MasterPrompt, PackagingBrief, ProductItem, Project, StorageInfo } from './types';
 import { FolderFile, groupByFolder } from './utils/folderImport';
 import { isGenericName } from './utils/positionsImport';
 import { TopBar, TOOL_LABELS, StudioView } from './components/TopBar';
@@ -20,6 +20,7 @@ import { ImageCropModal } from './components/ImageCropModal';
 import { RightDrawer } from './components/RightDrawer';
 import { DockSlot } from './components/DockSlot';
 import { CatalogStudio } from './components/CatalogStudio';
+import { PackagingStudio } from './components/PackagingStudio';
 import { Info } from './components/Info';
 import { useStudioLayout } from './hooks/useStudioLayout';
 import { useProjectData } from './hooks/useProjectData';
@@ -73,7 +74,7 @@ export default function App() {
   const [studioView, setStudioViewState] = useState<StudioView>(() => {
     try {
       const v = localStorage.getItem('aips_view');
-      return v === 'catalog' || v === 'video' ? v : 'board';
+      return v === 'catalog' || v === 'video' || v === 'packaging' ? v : 'board';
     } catch {
       return 'board';
     }
@@ -207,6 +208,13 @@ export default function App() {
     setStorageInfo,
     undo,
   });
+
+  const handleUpdatePackaging = useCallback((packaging: PackagingBrief) => {
+    const updated = projects.map((project) => project.id === activeProjectId
+      ? { ...project, packaging, updatedAt: Date.now() }
+      : project);
+    saveProjectsToStorage(updated);
+  }, [activeProjectId, projects, saveProjectsToStorage]);
 
   // Photos and folders coming in: crop queue, folder → board / positions, products dropped on the board.
   const {
@@ -613,7 +621,7 @@ export default function App() {
             )}
           </div>
         )}
-        <Canvas
+        {studioView === 'board' && <Canvas
           project={activeProject}
           onAddFolder={askAboutFolder}
           onDeleteSelection={handleDeleteSelection}
@@ -669,7 +677,7 @@ export default function App() {
           onUpdateSiteMockup={handleUpdateSiteMockup}
           onDeleteSiteMockup={handleDeleteSiteMockup}
           onChangeSiteMockupOpacity={handleChangeSiteMockupOpacity}
-        />
+        />}
 
         {/* Kept alive on every tab, so a run keeps going while you work on the board */}
         {(
@@ -689,6 +697,15 @@ export default function App() {
           />
         )}
         {studioView === 'video' && <VideoTab projectName={activeProject.name} />}
+        {studioView === 'packaging' && (
+          <PackagingStudio
+            projectName={activeProject.name}
+            brief={activeProject.packaging}
+            boardCards={activeProject.cards || []}
+            onChange={handleUpdatePackaging}
+            onGoToBoard={() => setStudioView('board')}
+          />
+        )}
         </div>
       </div>
 
