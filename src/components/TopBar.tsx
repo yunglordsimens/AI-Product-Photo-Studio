@@ -71,7 +71,7 @@ interface TopBarProps {
   catalogProgress?: { done: number; total: number } | null;
 }
 
-const APP_VERSION = 'v1.20 · 30.10';
+const APP_VERSION = 'v1.21 · 30.10';
 const LANGS = [
   { id: 'ru', label: 'RU', name: 'Русский' },
   { id: 'en', label: 'EN', name: 'English' },

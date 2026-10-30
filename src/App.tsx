@@ -1,52 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import {
-  Card,
-  CardGroup,
-  Connection,
-  MasterPrompt,
-  Note,
-  NoteColor,
-  ProductItem,
-  Project,
-  SiteMockup,
-  StorageInfo,
-  BoardMatrix,
-} from './types';
-import {
-  loadProjects,
-  loadProjectsAsync,
-  saveProjects,
-  getActiveProjectId,
-  setActiveProjectId,
-  getStorageUsage,
-  getStorageUsageAsync,
-  exportProjectToJson,
-  parseProjectJson,
-  mergeMasterPrompts,
-  clearAllMemory,
-  optimizeAllProjectsMemory,
-  loadMasterPrompts,
-  loadMasterPromptsAsync,
-  saveMasterPrompts,
-  loadProjectProducts,
-  saveProjectProducts,
-  appendProductsToProject,
-  requestPersistentStorage,
-} from './utils/storage';
-import { compressAndLoadImage, compressDataUrl, createSampleCard } from './utils/imageUtils';
-import { getStoredApiKey, hasGenerationAccess, generateImageWithGemini, analyzeStyleWithGemini, getImageModel } from './utils/gemini';
-import { splitSelection } from './utils/referenceRoles';
-import { SOURCE_FIX_MARKER } from './utils/storage';
-import { isImageFile, normalizeImageFiles } from './utils/heic';
-import { FolderFile, groupByFolder, folderFilesFromInput, snapshotFolderFiles } from './utils/folderImport';
-import { makeExample, promptByName, withExample } from './utils/promptExamples';
-import { ensureVariantCols, folderImportNote, importFolderToPositions, isGenericName, splitSku } from './utils/positionsImport';
-import { MATRIX_LABEL_H, MATRIX_LABEL_W, addLine, matrixFromPositions, isOverMatrix, matrixFromGroups, matrixToPositionDrafts, membersOf, newMatrix, removeLine, snapIntoMatrix, transposeMatrix } from './utils/matrix';
-import type { MatrixApi } from './components/BoardMatrixView';
+import { useState } from 'react';
+import { Card, MasterPrompt, ProductItem, Project, StorageInfo } from './types';
+import { FolderFile, groupByFolder } from './utils/folderImport';
+import { isGenericName } from './utils/positionsImport';
 import { TopBar, TOOL_LABELS, StudioView } from './components/TopBar';
 import { VideoTab } from './components/VideoTab';
 import { useUndo } from './hooks/useUndo';
-import { copyPictureToSystem } from './utils/clipboard';
 import { Sidebar } from './components/Sidebar';
 import { Canvas } from './components/Canvas';
 import { ShortcutsModal } from './components/ShortcutsModal';
@@ -54,42 +12,24 @@ import { ExportModal } from './components/ExportModal';
 import { ImagePreviewModal } from './components/ImagePreviewModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CloudBanner, CloudConflictsWindow } from './components/CloudUI';
-import { GenerationPanel, ConsideredNoteInfo } from './components/GenerationPanel';
+import { GenerationPanel } from './components/GenerationPanel';
 import { MasterPromptsModal } from './components/MasterPromptsModal';
 import { StyleAnalysisModal } from './components/StyleAnalysisModal';
 import { ProductLibraryDrawer } from './components/ProductLibraryDrawer';
-import { compressImageDataUrl } from './utils/storage';
-import { ImageCropModal, CropAspectRatio, cropRatioValue } from './components/ImageCropModal';
+import { ImageCropModal } from './components/ImageCropModal';
 import { RightDrawer } from './components/RightDrawer';
 import { DockSlot } from './components/DockSlot';
 import { CatalogStudio } from './components/CatalogStudio';
 import { Info } from './components/Info';
-import { angleOf, slotGet } from './utils/positions';
-import { cropProducts, detectProducts } from './utils/cutProducts';
-
-interface CanvasCropQueueItem {
-  id: string;
-  name: string;
-  rawSrc: string;
-  atCanvasPos?: { x: number; y: number };
-}
-
-// Helper to calculate Euclidean distance between two bounding boxes
-function getDistanceBetweenRects(
-  r1: { x: number; y: number; width: number; height: number },
-  r2: { x: number; y: number; width: number; height: number }
-): number {
-  const dx = Math.max(0, Math.max(r1.x - (r2.x + r2.width), r2.x - (r1.x + r1.width)));
-  const dy = Math.max(0, Math.max(r1.y - (r2.y + r2.height), r2.y - (r1.y + r1.height)));
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
-/** Main address of the studio. Every deployment also gets its own one-off address with a separate, empty browser storage. */
-const STUDIO_HOME_HOST = 'ai-product-photo-studio-seven.vercel.app';
-const isDeploymentCopy =
-  typeof window !== 'undefined' &&
-  window.location.hostname.endsWith('.vercel.app') &&
-  window.location.hostname !== STUDIO_HOME_HOST;
+import { useStudioLayout } from './hooks/useStudioLayout';
+import { useProjectData } from './hooks/useProjectData';
+import { useImageImport } from './hooks/useImageImport';
+import { useBoardEditing } from './hooks/useBoardEditing';
+import { useGeneration } from './hooks/useGeneration';
+import { useProjectFiles } from './hooks/useProjectFiles';
+import { usePositionsAndAxes } from './hooks/usePositionsAndAxes';
+import { useBoardShortcuts } from './hooks/useBoardShortcuts';
+import { CanvasCropQueueItem, DockId, STUDIO_HOME_HOST, isDeploymentCopy } from './studio/shared';
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -101,32 +41,26 @@ export default function App() {
     maxBytes: 5 * 1024 * 1024,
     percentage: 0,
   });
-
   // Master Prompts state
   const [masterPrompts, setMasterPrompts] = useState<MasterPrompt[]>([]);
   const [isMasterPromptsOpen, setIsMasterPromptsOpen] = useState(false);
   const [currentPromptPreset, setCurrentPromptPreset] = useState<string>('');
-
   // Connections between cards (Miro-style)
   const [isConnectionMode, setIsConnectionMode] = useState(false);
   const [connectingSourceCardId, setConnectingSourceCardId] = useState<string | null>(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
-
   // Style Analysis State (gemini-2.5-flash)
   const [isStyleAnalysisOpen, setIsStyleAnalysisOpen] = useState(false);
   const [isAnalyzingStyle, setIsAnalyzingStyle] = useState(false);
   const [styleAnalysisTags, setStyleAnalysisTags] = useState('');
-
   // Product Library State (localStorage 'aips_products')
   const [productsList, setProductsList] = useState<ProductItem[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isProductLibraryOpen, setIsProductLibraryOpen] = useState(false);
-
   // Canvas Image Crop Queue State
   const [canvasCropQueue, setCanvasCropQueue] = useState<CanvasCropQueueItem[]>([]);
   const [canvasCropIndex, setCanvasCropIndex] = useState<number>(0);
   const [pendingCanvasCards, setPendingCanvasCards] = useState<Card[]>([]);
-
   // Modal & Panel states
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isRightDrawerOpen, setIsRightDrawerOpen] = useState(false);
@@ -144,23 +78,6 @@ export default function App() {
       return 'board';
     }
   });
-  // Switching tabs folds the side panels (products, prompts, AI, menu) so nothing stays layered on top.
-  // The projects column stays: it only hides with «скрыть».
-  const setStudioView = useCallback((v: StudioView) => {
-    setStudioViewState((prev) => {
-      if (prev !== v) {
-        setIsProductLibraryOpen(false);
-        setIsGenerationOpen(false);
-        setIsRightDrawerOpen(false);
-        setIsMasterPromptsOpen(false);
-        setIsStyleAnalysisOpen(false);
-      }
-      return v;
-    });
-    try {
-      localStorage.setItem('aips_view', v);
-    } catch {}
-  }, []);
   // Generations in flight (queued + running) and the photos they are made from
   const [activeGenerations, setActiveGenerations] = useState(0);
   const [generatingCardIds, setGeneratingCardIds] = useState<Set<string>>(new Set());
@@ -168,29 +85,7 @@ export default function App() {
   const [previewCard, setPreviewCard] = useState<Card | null>(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
-
-  // Hidden file inputs
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const jsonInputRef = useRef<HTMLInputElement>(null);
-  const siteMockupInputRef = useRef<HTMLInputElement>(null);
-
-  // Which side panels are open, in the order they were opened (for the dock)
-  type DockId = 'products' | 'ai' | 'menu';
   const [dockOrder, setDockOrder] = useState<DockId[]>([]);
-  const dockRef = useRef<HTMLDivElement>(null);
-  const dockOpen: Record<DockId, boolean> = { products: isProductLibraryOpen, ai: isGenerationOpen, menu: isRightDrawerOpen };
-  // Newly opened panels join at the right edge; closed ones stay until their closing animation ends
-  useEffect(() => {
-    setDockOrder((prev) => [...prev, ...(Object.keys(dockOpen) as DockId[]).filter((id) => dockOpen[id] && !prev.includes(id))]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isProductLibraryOpen, isGenerationOpen, isRightDrawerOpen]);
-  const dropFromDock = useCallback(
-    (id: DockId) => setDockOrder((prev) => prev.filter((x) => x !== id || dockOpenRef.current[id])),
-    []
-  );
-  const dockOpenRef = useRef(dockOpen);
-  dockOpenRef.current = dockOpen;
-  const DOCK_MIN: Record<DockId, number> = { products: 420, ai: 340, menu: 240 };
   const [dockWidths, setDockWidths] = useState<Record<DockId, number>>(() => {
     const base = { products: 640, ai: 400, menu: 280 };
     try {
@@ -199,16 +94,6 @@ export default function App() {
       return base;
     }
   });
-  const resizeDock = useCallback((id: DockId, w: number) => {
-    setDockWidths((prev) => {
-      const next = { ...prev, [id]: w };
-      try {
-        localStorage.setItem('aips_dock_widths', JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-  }, []);
-
   // Projects column on the left can be hidden on desktop
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
     try {
@@ -224,30 +109,6 @@ export default function App() {
       return 180;
     }
   });
-  const resizeSidebar = useCallback((w: number) => {
-    setSidebarWidth(w);
-    try {
-      localStorage.setItem('aips_sidebar_width', String(w));
-    } catch {}
-  }, []);
-  const toggleSidebar = useCallback(() => {
-    if (window.innerWidth < 768) {
-      setIsMobileSidebarOpen((prev) => !prev);
-      return;
-    }
-    setIsSidebarCollapsed((prev) => {
-      try {
-        localStorage.setItem('aips_sidebar_collapsed', prev ? '0' : '1');
-      } catch {}
-      return !prev;
-    });
-  }, []);
-  // A newly opened panel comes into view at the right edge
-  useEffect(() => {
-    const el = dockRef.current;
-    if (el) el.scrollTo({ left: el.scrollWidth, behavior: 'smooth' });
-  }, [dockOrder]);
-
   // Top-bar buttons switched off in the menu
   const [hiddenTools, setHiddenTools] = useState<string[]>(() => {
     try {
@@ -256,2334 +117,294 @@ export default function App() {
       return [];
     }
   });
-  const toggleTool = useCallback((id: string) => {
-    setHiddenTools((prev) => {
-      const next = prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id];
-      try {
-        localStorage.setItem('aips_hidden_tools', JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-  }, []);
-
-  // Initial Data Load with IndexedDB hydration & auto-migration
-  useEffect(() => {
-    // 1. Fast sync initial state
-    const fastProjects = loadProjects();
-    setProjects(fastProjects);
-    const activeId = getActiveProjectId(fastProjects);
-    setActiveProjectIdState(activeId);
-    setMasterPrompts(loadMasterPrompts());
-    setStorageInfo(getStorageUsage());
-
-    // Ask the browser to keep the studio's data even when the disk fills up
-    requestPersistentStorage();
-
-    // 2. Full IndexedDB async hydration
-    let isMounted = true;
-    (async () => {
-      try {
-        const [asyncProjects, asyncPrompts, asyncStorage] = await Promise.all([
-          loadProjectsAsync(),
-          loadMasterPromptsAsync(),
-          getStorageUsageAsync(),
-        ]);
-        if (isMounted) {
-          if (asyncProjects && asyncProjects.length > 0) {
-            setProjects(asyncProjects);
-            const currentActive = getActiveProjectId(asyncProjects);
-            setActiveProjectIdState(currentActive);
-          }
-          if (asyncPrompts && asyncPrompts.length > 0) {
-            setMasterPrompts(asyncPrompts);
-          }
-          setIsHydrated(true);
-          if (asyncStorage) {
-            setStorageInfo(asyncStorage);
-          }
-          setStorageInfo(await getStorageUsageAsync());
-        }
-      } catch (err) {
-        console.warn('Async IndexedDB hydration error:', err);
-      }
-    })();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  // Save Master Prompts
-  const masterPromptsRef = useRef<MasterPrompt[]>([]);
-  masterPromptsRef.current = masterPrompts;
-  const handleSaveMasterPrompts = useCallback((prompts: MasterPrompt[]) => {
-    masterPromptsRef.current = prompts;
-    setMasterPrompts(prompts);
-    saveMasterPrompts(prompts);
-  }, []);
-
-  // Toggle Connection Mode
-  // Links mode needs the board: turning it on folds the AI and positions panels
-  const handleToggleConnectionMode = useCallback(() => {
-    setIsConnectionMode((prev) => {
-      if (prev) {
-        setConnectingSourceCardId(null);
-        setSelectedConnectionId(null);
-      } else {
-        setIsGenerationOpen(false);
-        setIsProductLibraryOpen(false);
-      }
-      return !prev;
-    });
-  }, []);
-
-  /** The logo: fold every side panel and window; the projects column stays as it is */
-  const handleLogoClick = useCallback(() => {
-    setIsGenerationOpen(false);
-    setIsProductLibraryOpen(false);
-    setIsRightDrawerOpen(false);
-    setIsMasterPromptsOpen(false);
-    setIsStyleAnalysisOpen(false);
-    setIsSettingsOpen(false);
-    setIsExportModalOpen(false);
-    setIsShortcutsOpen(false);
-    setIsConnectionMode(false);
-    setConnectingSourceCardId(null);
-  }, []);
-
-  // Sync to IndexedDB Storage
-  // ---- Undo / redo: every saved change of the board or of the positions is a step ----
+  // Undo / redo: every saved change of the board or of the positions is a step
   const undo = useUndo();
-  const latestProjectsRef = useRef(projects);
-  latestProjectsRef.current = projects;
-  const latestProductsRef = useRef(productsList);
-  latestProductsRef.current = productsList;
-
-  const saveProjectsToStorage = useCallback((updatedProjects: Project[]) => {
-    undo.record({ kind: 'board', state: latestProjectsRef.current });
-    // Async work (parallel generations, cutting) reads this ref: keep it current before the next render
-    latestProjectsRef.current = updatedProjects;
-    setProjects(updatedProjects);
-    saveProjects(updatedProjects);
-    // Asynchronously refresh accurate storage usage
-    getStorageUsageAsync().then((usage) => {
-      if (usage) setStorageInfo(usage);
-    }).catch(() => {
-      setStorageInfo(getStorageUsage());
-    });
-  }, [undo]);
-
-  // Active Project Reference
-  const activeProject =
-    projects.find((p) => p.id === activeProjectId) ||
-    projects[0] || {
-      id: 'default',
-      name: 'Новый проект',
-      cards: [],
-      notes: [],
-      connections: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      pan: { x: 80, y: 80 },
-      zoom: 1,
-    };
-
-  // Switch Active Project
-  const handleSelectProject = useCallback((id: string) => {
-    setActiveProjectIdState(id);
-    setActiveProjectId(id);
-    setSelectedCardIds(new Set());
-    setSelectedNoteIds(new Set());
-    setSelectedConnectionId(null);
-    setConnectingSourceCardId(null);
-  }, []);
-
-  // Create Project
-  const handleCreateProject = useCallback(() => {
-    const defaultName = `Проект ${projects.length + 1}`;
-    const name = window.prompt('Введите название нового проекта:', defaultName);
-    if (!name || !name.trim()) return;
-
-    const newProject: Project = {
-      id: `proj_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-      name: name.trim(),
-      cards: [],
-      notes: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      pan: { x: 80, y: 80 },
-      zoom: 1,
-    };
-
-    const updated = [...projects, newProject];
-    saveProjectsToStorage(updated);
-    handleSelectProject(newProject.id);
-  }, [projects, saveProjectsToStorage, handleSelectProject]);
-
-  // Delete Project
-  const handleDeleteProject = useCallback(
-    (id: string) => {
-      if (projects.length <= 1) {
-        window.alert('Нельзя удалить единственный проект');
-        return;
-      }
-
-      const projToDelete = projects.find((p) => p.id === id);
-      const confirmDelete = window.confirm(
-        `Удалить проект "${projToDelete?.name || 'Без имени'}" и все его карточки?`
-      );
-      if (!confirmDelete) return;
-
-      const filtered = projects.filter((p) => p.id !== id);
-      saveProjectsToStorage(filtered);
-
-      if (activeProjectId === id) {
-        const nextActive = filtered[0]?.id || '';
-        handleSelectProject(nextActive);
-      }
-    },
-    [projects, activeProjectId, saveProjectsToStorage, handleSelectProject]
-  );
-
-  // Rename Project
-  const handleRenameProject = useCallback(
-    (id: string, newName: string) => {
-      const updated = projects.map((p) => {
-        if (p.id === id) {
-          return { ...p, name: newName, updatedAt: Date.now() };
-        }
-        return p;
-      });
-      saveProjectsToStorage(updated);
-    },
-    [projects, saveProjectsToStorage]
-  );
-
-  // Update Pan and Zoom for active project
-  const handleUpdatePanZoom = useCallback(
-    (pan: { x: number; y: number }, zoom: number) => {
-      // Built from the latest state, so a pan right after adding photos never saves an older list
-      setProjects((prev) => {
-        const updated = prev.map((p) => (p.id === activeProjectId ? { ...p, pan, zoom } : p));
-        saveProjects(updated);
-        return updated;
-      });
-    },
-    [activeProjectId]
-  );
-
-  // Update Cards in active project
-  const handleUpdateCards = useCallback(
-    (cards: Card[]) => {
-      const updated = projects.map((p) => {
-        if (p.id === activeProjectId) {
-          return { ...p, cards, updatedAt: Date.now() };
-        }
-        return p;
-      });
-      saveProjectsToStorage(updated);
-    },
-    [activeProjectId, projects, saveProjectsToStorage]
-  );
-
-  // Update Notes in active project
-  const handleUpdateNotes = useCallback(
-    (notes: Note[]) => {
-      const updated = projects.map((p) => {
-        if (p.id === activeProjectId) {
-          return { ...p, notes, updatedAt: Date.now() };
-        }
-        return p;
-      });
-      saveProjectsToStorage(updated);
-    },
-    [activeProjectId, projects, saveProjectsToStorage]
-  );
-
-  // Add Note
-  const handleAddNote = useCallback(
-    (note: Note) => {
-      const currentNotes = activeProject.notes || [];
-      const updated = [...currentNotes, note];
-      handleUpdateNotes(updated);
-    },
-    [activeProject.notes, handleUpdateNotes]
-  );
-
-  // Delete Note
-  const handleDeleteNote = useCallback(
-    (noteId: string) => {
-      const currentNotes = activeProject.notes || [];
-      const filtered = currentNotes.filter((n) => n.id !== noteId);
-      handleUpdateNotes(filtered);
-      setSelectedNoteIds((prev) => {
-        const next = new Set(prev);
-        next.delete(noteId);
-        return next;
-      });
-    },
-    [activeProject.notes, handleUpdateNotes]
-  );
-
-  // Update Note Text
-  const handleUpdateNoteText = useCallback(
-    (noteId: string, text: string) => {
-      const currentNotes = activeProject.notes || [];
-      const updated = currentNotes.map((n) => (n.id === noteId ? { ...n, text } : n));
-      handleUpdateNotes(updated);
-    },
-    [activeProject.notes, handleUpdateNotes]
-  );
-
-  // Update Note Color
-  const handleUpdateNoteColor = useCallback(
-    (noteId: string, color: NoteColor) => {
-      const currentNotes = activeProject.notes || [];
-      const updated = currentNotes.map((n) => (n.id === noteId ? { ...n, color } : n));
-      handleUpdateNotes(updated);
-    },
-    [activeProject.notes, handleUpdateNotes]
-  );
-
-  // Update Note Size
-  const handleUpdateNoteSize = useCallback(
-    (noteId: string, width: number, height: number) => {
-      const currentNotes = activeProject.notes || [];
-      const updated = currentNotes.map((n) =>
-        n.id === noteId ? { ...n, width, height } : n
-      );
-      handleUpdateNotes(updated);
-    },
-    [activeProject.notes, handleUpdateNotes]
-  );
-
-  // Detach Note from Card
-  const handleDetachNote = useCallback(
-    (noteId: string) => {
-      const currentNotes = activeProject.notes || [];
-      const updated = currentNotes.map((n) =>
-        n.id === noteId ? { ...n, attachedTo: null } : n
-      );
-      handleUpdateNotes(updated);
-    },
-    [activeProject.notes, handleUpdateNotes]
-  );
-
-  // Add Image Files to Canvas via Sequential Crop Queue
-  const handleAddImages = useCallback(
-    async (files: File[], atCanvasPos?: { x: number; y: number }) => {
-      const currentStorage = getStorageUsage();
-      if (currentStorage.percentage >= 80) {
-        setStorageWarning('Память почти заполнена (>80%). Нажмите «Оптимизировать память»');
-      }
-
-      const imageFiles = (await normalizeImageFiles(files.filter(isImageFile))).filter(
-        (f) => f.type.startsWith('image/') || f.name.match(/\.(png|jpe?g|webp|gif|svg|avif)$/i)
-      );
-      if (imageFiles.length === 0) return;
-
-      const queueItems: CanvasCropQueueItem[] = [];
-
-      for (const file of imageFiles) {
-        try {
-          const rawSrc = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-          });
-
-          queueItems.push({
-            id: `crop_item_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-            name: file.name,
-            rawSrc,
-            atCanvasPos,
-          });
-        } catch (err) {
-          console.error('Failed to read image file for crop queue:', err);
-        }
-      }
-
-      if (queueItems.length > 0) {
-        setCanvasCropQueue(queueItems);
-        setCanvasCropIndex(0);
-        setPendingCanvasCards([]);
-      }
-    },
-    []
-  );
-
-  // Folder import: no crop queue; one group per subfolder, laid out as blocks
+  // Status line on top (folder import, cutting, examples…)
   const [folderImportStatus, setFolderImportStatus] = useState<string | null>(null);
-  const handleAddFolder = useCallback(
-    async (folderFiles: FolderFile[], atCanvasPos?: { x: number; y: number }) => {
-      if (folderFiles.length === 0) return;
-      const groupsIn = groupByFolder(folderFiles);
-      const CARD_W = 200;
-      const GAP = 24;
-      const COLS = 6;
-      const groupColors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#ef4444', '#84cc16'];
-      const startX = atCanvasPos?.x ?? (-(activeProject.pan?.x || 80) + 120) / (activeProject.zoom || 1);
-      let cursorY = atCanvasPos?.y ?? (-(activeProject.pan?.y || 80) + 120) / (activeProject.zoom || 1);
-      const existingCards = activeProject.cards || [];
-      let z = existingCards.reduce((m, c) => Math.max(m, c.zIndex || 1), 1);
-      const newCards: Card[] = [];
-      const newGroups: CardGroup[] = [];
-      let done = 0;
-      const total = folderFiles.length;
-
-      for (let gi = 0; gi < groupsIn.length; gi++) {
-        const g = groupsIn[gi];
-        const files = await normalizeImageFiles(g.files.map((f) => f.file));
-        const rowHeights: number[] = [];
-        const groupCardIds: string[] = [];
-        for (let i = 0; i < files.length; i++) {
-          setFolderImportStatus(`Загружаю ${++done} из ${total}: ${g.name}`);
-          const raw = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(files[i]);
-          }).catch(() => '');
-          if (!raw) continue;
-          const src = await compressDataUrl(raw, 1024, 1024, 0.85);
-          const dims = await new Promise<{ w: number; h: number }>((resolve) => {
-            const img = new Image();
-            img.onload = () => resolve({ w: img.naturalWidth || 1, h: img.naturalHeight || 1 });
-            img.onerror = () => resolve({ w: 4, h: 3 });
-            img.src = src;
-          });
-          const h = Math.round(CARD_W * (dims.h / dims.w));
-          const col = i % COLS;
-          const row = Math.floor(i / COLS);
-          const rowTop = cursorY + rowHeights.slice(0, row).reduce((a, b) => a + b + GAP + 34, 0);
-          rowHeights[row] = Math.max(rowHeights[row] || 0, h);
-          const card: Card = {
-            id: `card_dir_${Date.now()}_${gi}_${i}_${Math.random().toString(36).substr(2, 4)}`,
-            x: Math.round(startX + col * (CARD_W + GAP)),
-            y: Math.round(rowTop),
-            width: CARD_W,
-            height: h,
-            src,
-            name: files[i].name.replace(/\.[^.]+$/, ''),
-            aspectRatio: CARD_W / h,
-            zIndex: ++z,
-          };
-          newCards.push(card);
-          groupCardIds.push(card.id);
-        }
-        if (groupCardIds.length > 0) {
-          newGroups.push({
-            id: `group_dir_${Date.now()}_${gi}_${Math.random().toString(36).substr(2, 4)}`,
-            type: 'group',
-            name: g.name.split(' / ').map((part, k, arr) => (k === arr.length - 1 ? splitSku(part).name : part)).join(' / '),
-            children: groupCardIds,
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
-            color: groupColors[gi % groupColors.length],
-          });
-        }
-        const blockHeight = rowHeights.reduce((a, b) => a + b + GAP + 34, 0);
-        cursorY += blockHeight + 110;
-      }
-
-      setFolderImportStatus(null);
-      saveProjectsToStorage(
-        projects.map((p) =>
-          p.id === activeProjectId
-            ? {
-                ...p,
-                cards: [...(p.cards || []), ...newCards],
-                groups: [...(p.groups || []), ...newGroups],
-                updatedAt: Date.now(),
-              }
-            : p
-        )
-      );
-    },
-    [activeProject, activeProjectId, projects, saveProjectsToStorage]
-  );
-
   // A dropped / picked folder first asks what it is: products (positions) or photos for the board
   const [pendingFolder, setPendingFolder] = useState<{ files: FolderFile[]; pos?: { x: number; y: number } } | null>(null);
-  const askAboutFolder = useCallback((files: FolderFile[], pos?: { x: number; y: number }) => {
-    if (files.length > 0) setPendingFolder({ files, pos });
-  }, []);
-
-  /** Set further down: lays positions out on the board as «Оси» */
-  const showOnBoardRef = useRef<((ids?: string[]) => void) | null>(null);
-  const handleImportFolderAsProducts = useCallback(
-    async (folderFiles: FolderFile[]) => {
-      const r = await importFolderToPositions(folderFiles, productsList, (done, total, label) =>
-        setFolderImportStatus(`Позиции: ${done} из ${total} — ${label}`)
-      );
-      setProductsList(r.next);
-      saveProjectProducts(activeProjectId, r.next);
-      if (r.maxPhotos > 1) ensureVariantCols(r.maxPhotos - 1);
-      setFolderImportStatus(folderImportNote(r));
-      setTimeout(() => setFolderImportStatus(null), 8000);
-      setIsProductLibraryOpen(true);
-      // the same products appear on the board as «Оси»
-      const before = new Set(productsList.map((p) => p.id));
-      const fresh = r.next.filter((p) => !before.has(p.id)).map((p) => p.id);
-      if (fresh.length) showOnBoardRef.current?.(fresh);
-    },
-    [productsList, activeProjectId]
-  );
-
-  const folderInputRef = useRef<HTMLInputElement>(null);
-  const folderModeRef = useRef<'ask' | 'products' | 'board'>('ask');
-  const handleFolderInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files: File[] = e.target.files ? Array.from(e.target.files) : [];
-    const mode = folderModeRef.current;
-    folderModeRef.current = 'ask';
-    if (files.length === 0) return;
-    // read into memory first: the files must stay readable while the «куда?» question is open
-    const ff = await snapshotFolderFiles(folderFilesFromInput(files));
-    e.target.value = '';
-    if (mode === 'products') await handleImportFolderAsProducts(ff);
-    else if (mode === 'board') await handleAddFolder(ff);
-    else askAboutFolder(ff);
-  };
-  const pickFolder = (mode: 'ask' | 'products' | 'board') => {
-    folderModeRef.current = mode;
-    folderInputRef.current?.click();
-  };
-
-  // Products dragged from the library onto the board: a column of named cards
-  const handleDropProducts = useCallback(
-    async (ids: string[], pos: { x: number; y: number }) => {
-      const picked = productsList.filter((p) => ids.includes(p.id) && p.photoDataUrl);
-      if (picked.length === 0) return;
-      const CARD_W = 220;
-      let y = pos.y;
-      let z = (activeProject.cards || []).reduce((m, c) => Math.max(m, c.zIndex || 1), 1);
-      const cards: Card[] = [];
-      for (const prod of picked) {
-        const dims = await new Promise<{ w: number; h: number }>((resolve) => {
-          const img = new Image();
-          img.onload = () => resolve({ w: img.naturalWidth || 1, h: img.naturalHeight || 1 });
-          img.onerror = () => resolve({ w: 1, h: 1 });
-          img.src = prod.photoDataUrl;
-        });
-        const h = Math.round(CARD_W * (dims.h / dims.w));
-        cards.push({
-          id: `card_prod_${prod.id}_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-          x: Math.round(pos.x),
-          y: Math.round(y),
-          width: CARD_W,
-          height: h,
-          src: prod.photoDataUrl,
-          name: prod.name,
-          aspectRatio: CARD_W / h,
-          zIndex: ++z,
-        });
-        y += h + 60;
-      }
-      handleUpdateCards([...(activeProject.cards || []), ...cards]);
-    },
-    [productsList, activeProject, handleUpdateCards]
-  );
-
-  // Save current cropped canvas image and proceed to next in queue
-  const handleSaveCanvasCrop = useCallback(
-    (croppedDataUrl: string, croppedWidth: number, croppedHeight: number) => {
-      const currentItem = canvasCropQueue[canvasCropIndex];
-      if (!currentItem) return;
-
-      const currentCards = activeProject.cards || [];
-      const totalCreated = pendingCanvasCards.length;
-
-      let posX = currentItem.atCanvasPos
-        ? currentItem.atCanvasPos.x + totalCreated * 35
-        : 150 + totalCreated * 35;
-      let posY = currentItem.atCanvasPos
-        ? currentItem.atCanvasPos.y + totalCreated * 35
-        : 150 + totalCreated * 35;
-
-      const cardWidth = Math.min(300, Math.max(180, croppedWidth));
-      const cardHeight = Math.round(cardWidth * (croppedHeight / croppedWidth)) || 240;
-      const maxZ = currentCards.reduce((max, c) => Math.max(max, c.zIndex || 1), 1);
-
-      const newCard: Card = {
-        id: `card_${Date.now()}_${totalCreated}_${Math.random().toString(36).substr(2, 5)}`,
-        x: Math.round(posX),
-        y: Math.round(posY),
-        width: cardWidth,
-        height: cardHeight,
-        src: croppedDataUrl,
-        name: currentItem.name,
-        aspectRatio: croppedWidth / croppedHeight,
-        zIndex: maxZ + 1 + totalCreated,
-      };
-
-      const newPending = [...pendingCanvasCards, newCard];
-      setPendingCanvasCards(newPending);
-
-      const nextIndex = canvasCropIndex + 1;
-      if (nextIndex < canvasCropQueue.length) {
-        setCanvasCropIndex(nextIndex);
-      } else {
-        // Queue finished! Commit all created cards to project
-        const mergedCards = [...currentCards, ...newPending];
-        handleUpdateCards(mergedCards);
-
-        const newIds = new Set(newPending.map((c) => c.id));
-        setSelectedCardIds(newIds);
-        setSelectedNoteIds(new Set());
-
-        setCanvasCropQueue([]);
-        setCanvasCropIndex(0);
-        setPendingCanvasCards([]);
-
-        setTimeout(() => {
-          const updatedUsage = getStorageUsage();
-          if (updatedUsage.percentage >= 80) {
-            setStorageWarning('Память почти заполнена (>80%). Нажмите «Оптимизировать память»');
-          }
-        }, 100);
-      }
-    },
-    [canvasCropQueue, canvasCropIndex, pendingCanvasCards, activeProject.cards, handleUpdateCards]
-  );
-
-  // Cancel current item crop in queue
-  const handleCancelCanvasCrop = useCallback(() => {
-    const nextIndex = canvasCropIndex + 1;
-    if (nextIndex < canvasCropQueue.length) {
-      setCanvasCropIndex(nextIndex);
-    } else {
-      // Queue finished! If some cards were previously saved in this batch, commit them
-      if (pendingCanvasCards.length > 0) {
-        const currentCards = activeProject.cards || [];
-        const mergedCards = [...currentCards, ...pendingCanvasCards];
-        handleUpdateCards(mergedCards);
-
-        const newIds = new Set(pendingCanvasCards.map((c) => c.id));
-        setSelectedCardIds(newIds);
-        setSelectedNoteIds(new Set());
-      }
-      setCanvasCropQueue([]);
-      setCanvasCropIndex(0);
-      setPendingCanvasCards([]);
-    }
-  }, [canvasCropQueue.length, canvasCropIndex, pendingCanvasCards, activeProject.cards, handleUpdateCards]);
-
-  // Apply chosen aspect ratio crop to all remaining photos in batch queue
-  const handleApplyCropToAllRemaining = useCallback(
-    async (aspectRatio: CropAspectRatio) => {
-      const remainingItems = canvasCropQueue.slice(canvasCropIndex);
-      if (remainingItems.length === 0) return;
-
-      const currentCards = activeProject.cards || [];
-      const newCards: Card[] = [...pendingCanvasCards];
-      const maxZ = currentCards.reduce((max, c) => Math.max(max, c.zIndex || 1), 1);
-
-      for (let i = 0; i < remainingItems.length; i++) {
-        const item = remainingItems[i];
-        const totalCreated = newCards.length;
-
-        const posX = item.atCanvasPos
-          ? item.atCanvasPos.x + totalCreated * 35
-          : 150 + totalCreated * 35;
-        const posY = item.atCanvasPos
-          ? item.atCanvasPos.y + totalCreated * 35
-          : 150 + totalCreated * 35;
-
-        try {
-          const cropped = await new Promise<{ src: string; width: number; height: number }>((resolve) => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => {
-              const targetRatio: number | null = cropRatioValue(aspectRatio);
-
-              let sx = 0;
-              let sy = 0;
-              let sw = img.naturalWidth;
-              let sh = img.naturalHeight;
-
-              if (targetRatio !== null) {
-                if (sw / sh > targetRatio) {
-                  const newW = Math.round(sh * targetRatio);
-                  sx = Math.round((sw - newW) / 2);
-                  sw = newW;
-                } else {
-                  const newH = Math.round(sw / targetRatio);
-                  sy = Math.round((sh - newH) / 2);
-                  sh = newH;
-                }
-              }
-
-              const maxDim = 1600;
-              let outW = sw;
-              let outH = sh;
-              if (outW > maxDim || outH > maxDim) {
-                if (outW >= outH) {
-                  outH = Math.round((outH * maxDim) / outW);
-                  outW = maxDim;
-                } else {
-                  outW = Math.round((outW * maxDim) / outH);
-                  outH = maxDim;
-                }
-              }
-
-              const canvas = document.createElement('canvas');
-              canvas.width = outW;
-              canvas.height = outH;
-              const ctx = canvas.getContext('2d');
-              if (ctx) {
-                ctx.imageSmoothingEnabled = true;
-                ctx.imageSmoothingQuality = 'high';
-                ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-                resolve({ src: dataUrl, width: outW, height: outH });
-              } else {
-                resolve({ src: item.rawSrc, width: img.naturalWidth, height: img.naturalHeight });
-              }
-            };
-            img.onerror = () => {
-              resolve({ src: item.rawSrc, width: 300, height: 300 });
-            };
-            img.src = item.rawSrc;
-          });
-
-          const cardWidth = Math.min(300, Math.max(180, cropped.width));
-          const cardHeight = Math.round(cardWidth * (cropped.height / cropped.width)) || 240;
-
-          newCards.push({
-            id: `card_${Date.now()}_${totalCreated}_${Math.random().toString(36).substr(2, 5)}`,
-            x: Math.round(posX),
-            y: Math.round(posY),
-            width: cardWidth,
-            height: cardHeight,
-            src: cropped.src,
-            name: item.name,
-            aspectRatio: cropped.width / cropped.height,
-            zIndex: maxZ + 1 + totalCreated,
-          });
-        } catch (err) {
-          console.error('Failed to crop batch image:', err);
-        }
-      }
-
-      const mergedCards = [...currentCards, ...newCards];
-      handleUpdateCards(mergedCards);
-
-      const newIds = new Set(newCards.map((c) => c.id));
-      setSelectedCardIds(newIds);
-      setSelectedNoteIds(new Set());
-
-      setCanvasCropQueue([]);
-      setCanvasCropIndex(0);
-      setPendingCanvasCards([]);
-    },
-    [canvasCropQueue, canvasCropIndex, pendingCanvasCards, activeProject.cards, handleUpdateCards]
-  );
-
-  // Skip all remaining and import original uncropped images directly
-  const handleSkipAllAndImportOriginals = useCallback(async () => {
-    const remainingItems = canvasCropQueue.slice(canvasCropIndex);
-    if (remainingItems.length === 0) return;
-
-    const currentCards = activeProject.cards || [];
-    const newCards: Card[] = [...pendingCanvasCards];
-    const maxZ = currentCards.reduce((max, c) => Math.max(max, c.zIndex || 1), 1);
-
-    for (let i = 0; i < remainingItems.length; i++) {
-      const item = remainingItems[i];
-      const totalCreated = newCards.length;
-
-      const posX = item.atCanvasPos
-        ? item.atCanvasPos.x + totalCreated * 35
-        : 150 + totalCreated * 35;
-      const posY = item.atCanvasPos
-        ? item.atCanvasPos.y + totalCreated * 35
-        : 150 + totalCreated * 35;
-
-      const dimensions = await new Promise<{ width: number; height: number }>((resolve) => {
-        const img = new Image();
-        img.onload = () => resolve({ width: img.naturalWidth || 300, height: img.naturalHeight || 300 });
-        img.onerror = () => resolve({ width: 300, height: 300 });
-        img.src = item.rawSrc;
-      });
-
-      const cardWidth = Math.min(300, Math.max(180, dimensions.width));
-      const cardHeight = Math.round(cardWidth * (dimensions.height / dimensions.width)) || 240;
-
-      newCards.push({
-        id: `card_${Date.now()}_${totalCreated}_${Math.random().toString(36).substr(2, 5)}`,
-        x: Math.round(posX),
-        y: Math.round(posY),
-        width: cardWidth,
-        height: cardHeight,
-        src: item.rawSrc,
-        name: item.name,
-        aspectRatio: dimensions.width / dimensions.height,
-        zIndex: maxZ + 1 + totalCreated,
-      });
-    }
-
-    const mergedCards = [...currentCards, ...newCards];
-    handleUpdateCards(mergedCards);
-
-    const newIds = new Set(newCards.map((c) => c.id));
-    setSelectedCardIds(newIds);
-    setSelectedNoteIds(new Set());
-
-    setCanvasCropQueue([]);
-    setCanvasCropIndex(0);
-    setPendingCanvasCards([]);
-  }, [canvasCropQueue, canvasCropIndex, pendingCanvasCards, activeProject.cards, handleUpdateCards]);
-
-  // Skip current photo only and advance
-  const handleSkipCurrentCanvasCrop = useCallback(async () => {
-    const currentItem = canvasCropQueue[canvasCropIndex];
-    if (!currentItem) return;
-
-    const currentCards = activeProject.cards || [];
-    const totalCreated = pendingCanvasCards.length;
-
-    const posX = currentItem.atCanvasPos
-      ? currentItem.atCanvasPos.x + totalCreated * 35
-      : 150 + totalCreated * 35;
-    const posY = currentItem.atCanvasPos
-      ? currentItem.atCanvasPos.y + totalCreated * 35
-      : 150 + totalCreated * 35;
-
-    const dimensions = await new Promise<{ width: number; height: number }>((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve({ width: img.naturalWidth || 300, height: img.naturalHeight || 300 });
-      img.onerror = () => resolve({ width: 300, height: 300 });
-      img.src = currentItem.rawSrc;
-    });
-
-    const cardWidth = Math.min(300, Math.max(180, dimensions.width));
-    const cardHeight = Math.round(cardWidth * (dimensions.height / dimensions.width)) || 240;
-    const maxZ = currentCards.reduce((max, c) => Math.max(max, c.zIndex || 1), 1);
-
-    const newCard: Card = {
-      id: `card_${Date.now()}_${totalCreated}_${Math.random().toString(36).substr(2, 5)}`,
-      x: Math.round(posX),
-      y: Math.round(posY),
-      width: cardWidth,
-      height: cardHeight,
-      src: currentItem.rawSrc,
-      name: currentItem.name,
-      aspectRatio: dimensions.width / dimensions.height,
-      zIndex: maxZ + 1 + totalCreated,
-    };
-
-    const newPending = [...pendingCanvasCards, newCard];
-    setPendingCanvasCards(newPending);
-
-    const nextIndex = canvasCropIndex + 1;
-    if (nextIndex < canvasCropQueue.length) {
-      setCanvasCropIndex(nextIndex);
-    } else {
-      const mergedCards = [...currentCards, ...newPending];
-      handleUpdateCards(mergedCards);
-
-      const newIds = new Set(newPending.map((c) => c.id));
-      setSelectedCardIds(newIds);
-      setSelectedNoteIds(new Set());
-
-      setCanvasCropQueue([]);
-      setCanvasCropIndex(0);
-      setPendingCanvasCards([]);
-    }
-  }, [canvasCropQueue, canvasCropIndex, pendingCanvasCards, activeProject.cards, handleUpdateCards]);
-
-  // Generate Sample Reference Product Card
-  const handleGenerateSample = useCallback(() => {
-    const samples = [
-      {
-        title: 'Lumina Velvet Serum',
-        category: 'Cosmetic',
-        theme: { bg1: '#fff7ed', bg2: '#ffedd5', accent: '#ea580c', icon: 'sparkles' },
-      },
-      {
-        title: 'Apex Stealth Trainer',
-        category: 'Footwear',
-        theme: { bg1: '#f8fafc', bg2: '#e2e8f0', accent: '#0f172a', icon: 'zap' },
-      },
-      {
-        title: 'Aura Nectar Eau De Parfum',
-        category: 'Perfume',
-        theme: { bg1: '#fdf4ff', bg2: '#fae8ff', accent: '#c026d3', icon: 'sparkles' },
-      },
-    ];
-
-    const pick = samples[Math.floor(Math.random() * samples.length)];
-    const card = createSampleCard(
-      `card_sample_${Date.now()}`,
-      pick.title,
-      pick.category,
-      200 + Math.random() * 150,
-      120 + Math.random() * 100,
-      pick.theme
-    );
-
-    const merged = [...(activeProject.cards || []), card];
-    handleUpdateCards(merged);
-    setSelectedCardIds(new Set([card.id]));
-    setSelectedNoteIds(new Set());
-  }, [activeProject.cards, handleUpdateCards]);
-
-  // Update Connections in active project
-  const handleUpdateConnections = useCallback(
-    (connections: Connection[]) => {
-      const updated = projects.map((p) => {
-        if (p.id === activeProjectId) {
-          return { ...p, connections, updatedAt: Date.now() };
-        }
-        return p;
-      });
-      saveProjectsToStorage(updated);
-    },
-    [activeProjectId, projects, saveProjectsToStorage]
-  );
-
-  // Add connection between two cards
-  const handleAddConnection = useCallback(
-    (fromCardId: string, toCardId: string) => {
-      if (fromCardId === toCardId) return;
-      const current = activeProject.connections || [];
-      const exists = current.some(
-        (c) =>
-          (c.from === fromCardId && c.to === toCardId) ||
-          (c.from === toCardId && c.to === fromCardId)
-      );
-      if (exists) return;
-
-      const newConn: Connection = {
-        id: `conn_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-        from: fromCardId,
-        to: toCardId,
-      };
-      handleUpdateConnections([...current, newConn]);
-    },
-    [activeProject.connections, handleUpdateConnections]
-  );
-
-  // Delete connection
-  const handleDeleteConnection = useCallback(
-    (connectionId: string) => {
-      const current = activeProject.connections || [];
-      handleUpdateConnections(current.filter((c) => c.id !== connectionId));
-      if (selectedConnectionId === connectionId) {
-        setSelectedConnectionId(null);
-      }
-    },
-    [activeProject.connections, handleUpdateConnections, selectedConnectionId]
-  );
-
-  // Delete single card
-  // Delete everything selected in one update (deleting one by one kept only the last change)
-  const handleDeleteSelection = useCallback(
-    (cardIds: string[], noteIds: string[]) => {
-      const cardSet = new Set(cardIds);
-      const noteSet = new Set(noteIds);
-      const updated = projects.map((p) => {
-        if (p.id !== activeProjectId) return p;
-        return {
-          ...p,
-          cards: (p.cards || []).filter((c) => !cardSet.has(c.id)),
-          notes: (p.notes || [])
-            .filter((n) => !noteSet.has(n.id))
-            .map((n) => (n.attachedTo && cardSet.has(n.attachedTo) ? { ...n, attachedTo: null } : n)),
-          connections: (p.connections || []).filter((c) => !cardSet.has(c.from) && !cardSet.has(c.to)),
-          groups: (p.groups || [])
-            .map((g) => ({ ...g, children: g.children.filter((id) => !cardSet.has(id)) }))
-            .filter((g) => g.children.length > 0),
-          updatedAt: Date.now(),
-        };
-      });
-      saveProjectsToStorage(updated);
-      setSelectedCardIds(new Set());
-      setSelectedNoteIds(new Set());
-    },
-    [projects, activeProjectId, saveProjectsToStorage]
-  );
-
-  const handleDeleteCard = useCallback(
-    (cardId: string) => {
-      const filtered = (activeProject.cards || []).filter((c) => c.id !== cardId);
-      // Also unpin any notes attached to deleted card
-      const updatedNotes = (activeProject.notes || []).map((n) =>
-        n.attachedTo === cardId ? { ...n, attachedTo: null } : n
-      );
-      // Also remove any connections tied to this card
-      const updatedConnections = (activeProject.connections || []).filter(
-        (c) => c.from !== cardId && c.to !== cardId
-      );
-      const updated = projects.map((p) => {
-        if (p.id === activeProjectId) {
-          return {
-            ...p,
-            cards: filtered,
-            notes: updatedNotes,
-            connections: updatedConnections,
-            updatedAt: Date.now(),
-          };
-        }
-        return p;
-      });
-      saveProjectsToStorage(updated);
-      setSelectedCardIds((prev) => {
-        const next = new Set(prev);
-        next.delete(cardId);
-        return next;
-      });
-    },
-    [activeProject.cards, activeProject.notes, activeProject.connections, projects, activeProjectId, saveProjectsToStorage]
-  );
-
-  // Duplicate Card
-  const handleDuplicateCard = useCallback(
-    (card: Card) => {
-      const duplicated: Card = {
-        ...card,
-        id: `card_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-        x: card.x + 30,
-        y: card.y + 30,
-      };
-      const updated = [...(activeProject.cards || []), duplicated];
-      handleUpdateCards(updated);
-      setSelectedCardIds(new Set([duplicated.id]));
-      setSelectedNoteIds(new Set());
-    },
-    [activeProject.cards, handleUpdateCards]
-  );
-
-  // Clear All Cards and Notes
-  const handleClearAll = useCallback(() => {
-    const totalItems =
-      (activeProject.cards?.length || 0) + (activeProject.notes?.length || 0);
-    if (totalItems === 0) return;
-    const confirmClear = window.confirm(
-      `Очистить все элементы на канвасе проекта "${activeProject.name}"?`
-    );
-    if (confirmClear) {
-      handleUpdateCards([]);
-      handleUpdateNotes([]);
-      handleUpdateConnections([]);
-      setSelectedCardIds(new Set());
-      setSelectedNoteIds(new Set());
-      setSelectedConnectionId(null);
-    }
-  }, [activeProject, handleUpdateCards, handleUpdateNotes, handleUpdateConnections]);
-
-  // Compute Considered Notes for Generation
-  const consideredNotes: ConsideredNoteInfo[] = useMemo(() => {
-    const currentCards = activeProject.cards || [];
-    const currentNotes = activeProject.notes || [];
-    const selectedCards = currentCards.filter((c) => selectedCardIds.has(c.id));
-
-    // If no cards are selected, but notes are selected, consider selected notes directly
-    if (selectedCards.length === 0) {
-      return currentNotes
-        .filter((n) => selectedNoteIds.has(n.id) && n.text.trim().length > 0)
-        .map((n) => ({
-          id: n.id,
-          text: n.text.trim(),
-          isAttached: Boolean(n.attachedTo),
-          color: n.color,
-          cardName: n.attachedTo
-            ? currentCards.find((c) => c.id === n.attachedTo)?.name
-            : undefined,
-        }));
-    }
-
-    const attachedList: ConsideredNoteInfo[] = [];
-    const nearbyList: ConsideredNoteInfo[] = [];
-    const processedNoteIds = new Set<string>();
-
-    // 1. First collect all notes ATTACHED to any of the selected cards
-    currentNotes.forEach((n) => {
-      if (
-        n.attachedTo &&
-        selectedCardIds.has(n.attachedTo) &&
-        n.text.trim().length > 0
-      ) {
-        const card = currentCards.find((c) => c.id === n.attachedTo);
-        attachedList.push({
-          id: n.id,
-          text: n.text.trim(),
-          isAttached: true,
-          color: n.color,
-          cardName: card?.name || 'Карточка',
-        });
-        processedNoteIds.add(n.id);
-      }
-    });
-
-    // 2. Then collect all UNATTACHED notes within 150px of any selected card
-    currentNotes.forEach((n) => {
-      if (processedNoteIds.has(n.id) || n.text.trim().length === 0) return;
-
-      const noteRect = {
-        x: n.x,
-        y: n.y,
-        width: n.width || 180,
-        height: n.height || 140,
-      };
-
-      let isNear = false;
-      for (const card of selectedCards) {
-        const cardRect = {
-          x: card.x,
-          y: card.y,
-          width: card.width,
-          height: card.height || 300,
-        };
-        if (getDistanceBetweenRects(noteRect, cardRect) <= 150) {
-          isNear = true;
-          break;
-        }
-      }
-
-      if (isNear) {
-        nearbyList.push({
-          id: n.id,
-          text: n.text.trim(),
-          isAttached: false,
-          color: n.color,
-        });
-      }
-    });
-
-    // Order: attached notes first, then nearby notes
-    return [...attachedList, ...nearbyList];
-  }, [activeProject.cards, activeProject.notes, selectedCardIds, selectedNoteIds]);
-
-  // Handle Site Mockup Actions
-  const handleUpdateSiteMockup = useCallback(
-    (mockup: SiteMockup | undefined) => {
-      const updated = projects.map((p) => {
-        if (p.id === activeProject.id) {
-          return { ...p, siteMockup: mockup, updatedAt: Date.now() };
-        }
-        return p;
-      });
-      saveProjectsToStorage(updated);
-    },
-    [activeProject.id, projects, saveProjectsToStorage]
-  );
-
-  const handleDeleteSiteMockup = useCallback(() => {
-    handleUpdateSiteMockup(undefined);
-  }, [handleUpdateSiteMockup]);
-
-  const handleChangeSiteMockupOpacity = useCallback(
-    (opacity: number) => {
-      if (!activeProject.siteMockup) return;
-      handleUpdateSiteMockup({
-        ...activeProject.siteMockup,
-        opacity: Math.max(0.1, Math.min(1.0, opacity)),
-      });
-    },
-    [activeProject.siteMockup, handleUpdateSiteMockup]
-  );
-
-  const handleAddSiteMockupClick = () => {
-    siteMockupInputRef.current?.click();
-  };
-
-  const handleSiteMockupFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (!dataUrl) return;
-
-      const img = new Image();
-      img.onload = () => {
-        const currentPan = activeProject.pan || { x: 80, y: 80 };
-        const currentZoom = activeProject.zoom || 1;
-
-        const naturalW = img.naturalWidth || 1200;
-        const naturalH = img.naturalHeight || 800;
-        const aspect = naturalW / naturalH;
-        const width = Math.min(1200, Math.max(600, naturalW));
-        const height = Math.round(width / aspect);
-
-        const initialX = Math.round((-currentPan.x + 80) / currentZoom);
-        const initialY = Math.round((-currentPan.y + 80) / currentZoom);
-
-        const newMockup: SiteMockup = {
-          src: dataUrl,
-          x: initialX,
-          y: initialY,
-          width,
-          height,
-          opacity: 0.5,
-          scale: 1,
-        };
-
-        handleUpdateSiteMockup(newMockup);
-      };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
-
-    if (siteMockupInputRef.current) siteMockupInputRef.current.value = '';
-  };
-
-  // Export All Project Images to Browser Downloads
-  const handleExportImages = useCallback(async () => {
-    const imageCards = (activeProject.cards || []).filter((c) => Boolean(c.src));
-    if (imageCards.length === 0) {
-      window.alert('В проекте нет карточек с изображениями для экспорта.');
-      return;
-    }
-
-    const safeProjectName = (activeProject.name || 'project')
-      .toLowerCase()
-      .replace(/[^a-z0-9а-яё_-]/gi, '_')
-      .slice(0, 20);
-
-    for (let i = 0; i < imageCards.length; i++) {
-      const card = imageCards[i];
-      const link = document.createElement('a');
-      link.download = `${safeProjectName}_card_${i + 1}_${card.id.slice(-5)}.png`;
-      link.href = card.src;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      if (i < imageCards.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-    }
-  }, [activeProject]);
-
-  // ---- Gemini generation ----
-  // Every selected product gets its own shot; photos with a «берём:» role are references for all of them.
-  // Runs go side by side (3 at a time, the rest wait in line); the button never locks.
-  const genSlots = useRef<{ running: number; queue: (() => void)[] }>({ running: 0, queue: [] });
-  const acquireGenSlot = () =>
-    new Promise<void>((resolve) => {
-      const s = genSlots.current;
-      if (s.running < 3) {
-        s.running++;
-        resolve();
-      } else s.queue.push(() => {
-        s.running++;
-        resolve();
-      });
-    });
-  const releaseGenSlot = () => {
-    const s = genSlots.current;
-    s.running--;
-    s.queue.shift()?.();
-  };
-  const selectedCardIdsRef = useRef(selectedCardIds);
-  selectedCardIdsRef.current = selectedCardIds;
-  const activeProjectIdRef = useRef(activeProjectId);
-  activeProjectIdRef.current = activeProjectId;
-
-  const handleTriggerGeminiGeneration = async (
-    prompt: string,
-    options?: {
-      isProductReplacement?: boolean;
-      selectedProduct?: ProductItem;
-      masterPromptName?: string;
-      /** Generate from these photos instead of the board selection (e.g. «править» on one photo) */
-      sourceCards?: Card[];
-      /** «попробовать на выделенном»: the result becomes this prompt's example */
-      exampleForPromptId?: string;
-    }
-  ) => {
-    const apiKey = getStoredApiKey();
-    if (!hasGenerationAccess()) {
-      setGenerationError('Укажите пароль студии или API-ключ в настройках');
-      setIsSettingsOpen(true);
-      return;
-    }
-
-    const projectId = activeProjectId;
-    const selectedCards = options?.sourceCards || (activeProject.cards || []).filter((c) => selectedCardIds.has(c.id));
-    const noteTexts = options?.sourceCards ? [] : consideredNotes.map((n) => n.text);
-
-    type Job = { sources: Card[]; anchor: Card[]; label?: string; photoRole?: 'product' | 'style' };
-    let jobs: Job[];
-    const single = options?.sourceCards || options?.isProductReplacement || options?.exampleForPromptId || prompt.includes(SOURCE_FIX_MARKER);
-    if (single) {
-      jobs = [{ sources: selectedCards, anchor: selectedCards, photoRole: options?.sourceCards ? 'product' : undefined }];
-    } else {
-      const { products, refs } = splitSelection(selectedCards);
-      if (products.length === 0) {
-        jobs = [{ sources: refs.slice(0, 5), anchor: refs, photoRole: refs.length ? 'style' : undefined }];
-      } else {
-        if (products.length > 10 && !window.confirm(`Сгенерировать ${products.length} кадров? Это ${products.length} запросов к Gemini.`)) return;
-        jobs = products.map((p) => ({
-          sources: [{ ...p, takes: Array.from(new Set(['product', ...(p.takes || [])])) }, ...refs.slice(0, 4)],
-          anchor: [p],
-          label: p.name,
-          photoRole: 'product',
-        }));
-      }
-    }
-    setGenerationError(null);
-    const selectionAtStart = selectedCardIdsRef.current;
-
-    const runJob = async (job: Job) => {
-      const ids = job.anchor.map((c) => c.id);
-      setActiveGenerations((n) => n + 1);
-      setGeneratingCardIds((prev) => new Set([...prev, ...ids]));
-      try {
-        await acquireGenSlot();
-        let result;
-        try {
-          result = await generateImageWithGemini(apiKey, prompt, job.sources, noteTexts, {
-            isProductReplacement: options?.isProductReplacement,
-            productImageDataUrl: options?.selectedProduct?.photoDataUrl,
-            photoRole: job.photoRole,
-          });
-        } finally {
-          releaseGenSlot();
-        }
-        const compressedDataUrl = await compressDataUrl(result.imageUrl, 1600, 1600, 0.9);
-
-        // Insert into the newest state of the project it was started in (other runs may have finished meanwhile)
-        const latest = latestProjectsRef.current;
-        const proj = latest.find((p) => p.id === projectId);
-        if (!proj) return;
-        const cards = proj.cards || [];
-        let newX: number;
-        let newY: number;
-        if (job.anchor.length > 0) {
-          const first = job.anchor[0];
-          const siblings = cards.filter((c) => c.meta?.sourceIds?.[0] === first.id).length;
-          newX = Math.max(...job.anchor.map((c) => c.x + c.width)) + 50 + siblings * 30;
-          newY = Math.min(...job.anchor.map((c) => c.y)) + 50 + siblings * 30;
-        } else {
-          const pan = proj.pan || { x: 80, y: 80 };
-          const zoom = proj.zoom || 1;
-          newX = (-pan.x + window.innerWidth / 2 - 120) / zoom;
-          newY = (-pan.y + window.innerHeight / 2 - 150) / zoom;
-        }
-        const maxZ = cards.reduce((max, c) => Math.max(max, c.zIndex || 1), 1);
-        const cardWidth = 240;
-        const cardHeight = Math.round(cardWidth * (result.height / result.width)) || 300;
-        const generatedCard: Card = {
-          id: `card_gen_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-          x: Math.round(newX),
-          y: Math.round(newY),
-          width: cardWidth,
-          height: cardHeight,
-          src: compressedDataUrl,
-          name: job.label ? `${job.label} · AI` : `Gemini_${new Date().toLocaleTimeString().replace(/:/g, '-')}.png`,
-          aspectRatio: cardWidth / cardHeight,
-          zIndex: maxZ + 1,
-          meta: {
-            kind: prompt.includes(SOURCE_FIX_MARKER) ? 'fix' : options?.isProductReplacement ? 'product' : 'generate',
-            prompt,
-            masterPromptName: options?.masterPromptName,
-            productName: options?.isProductReplacement ? options?.selectedProduct?.name : undefined,
-            model: getImageModel(),
-            sourceIds: job.sources.map((c) => c.id),
-            createdAt: Date.now(),
-          },
-        };
-        // "Made from" links: every source → the new card
-        const autoConnections: Connection[] = job.sources.slice(0, 5).map((c, i) => ({
-          id: `conn_auto_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`,
-          from: c.id,
-          to: generatedCard.id,
-          auto: true,
-        }));
-        saveProjectsToStorage(
-          latest.map((p) =>
-            p.id === projectId
-              ? { ...p, cards: [...(p.cards || []), generatedCard], connections: [...(p.connections || []), ...autoConnections], updatedAt: Date.now() }
-              : p
-          )
-        );
-        // One result and nothing else selected meanwhile: select it, so the next edit can follow
-        if (jobs.length === 1 && selectedCardIdsRef.current === selectionAtStart && projectId === activeProjectIdRef.current) {
-          setSelectedCardIds(new Set([generatedCard.id]));
-          setSelectedNoteIds(new Set());
-        }
-        // The first result of a master prompt becomes its example (or this one, when asked for)
-        const target = options?.exampleForPromptId
-          ? masterPromptsRef.current.find((mp) => mp.id === options.exampleForPromptId)
-          : promptByName(masterPromptsRef.current, options?.masterPromptName);
-        if (target && (options?.exampleForPromptId || !target.example)) {
-          makeExample(job.sources[0]?.src, compressedDataUrl, options?.exampleForPromptId ? 'manual' : 'auto').then((ex) =>
-            handleSaveMasterPrompts(withExample(masterPromptsRef.current, target.id, ex))
-          );
-        }
-      } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        setGenerationError(job.label && jobs.length > 1 ? `«${job.label}»: ${errorMsg}` : errorMsg);
-      } finally {
-        setActiveGenerations((n) => n - 1);
-        setGeneratingCardIds((prev) => {
-          const next = new Set(prev);
-          ids.forEach((id) => next.delete(id));
-          return next;
-        });
-      }
-    };
-    jobs.forEach((job) => void runJob(job));
-  };
-
-  /** A generated photo on the board → the example of the master prompt it was made with */
-  const handleMakeExampleFromCard = useCallback(
-    async (card: Card) => {
-      const mp = promptByName(masterPromptsRef.current, card.meta?.masterPromptName);
-      if (!mp) return;
-      const source = (activeProject.cards || []).find((c) => c.id === card.meta?.sourceIds?.[0]);
-      const ex = await makeExample(source?.src, card.src, 'manual');
-      handleSaveMasterPrompts(withExample(masterPromptsRef.current, mp.id, ex));
-      setFolderImportStatus(`Пример для «${mp.name}» обновлён.`);
-      setTimeout(() => setFolderImportStatus(null), 4000);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeProject.cards]
-  );
-
-  // Keyboard shortcut listener ('G' / 'g' / 'п' / 'П' for generation panel)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      ) {
-        return;
-      }
-
-      if (!e.metaKey && !e.ctrlKey && !e.altKey && (e.key === 'g' || e.key === 'G' || e.key === 'п' || e.key === 'П')) {
-        e.preventDefault();
-        setIsGenerationOpen((prev) => !prev);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  // Export JSON
-  const handleExportProject = useCallback(() => {
-    exportProjectToJson(activeProject, masterPrompts, productsList);
-  }, [activeProject, masterPrompts, productsList]);
-
-  // Import JSON
-  const handleImportProjectClick = () => {
-    jsonInputRef.current?.click();
-  };
-
-  const handleJsonFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const parsed = (await parseProjectJson(file)) as Project & { masterPrompts?: unknown; positions?: unknown; exportedAt?: number; format?: string };
-      const { masterPrompts: importedPrompts, positions: importedPositions, exportedAt: _e, format: _f, ...projectOnly } = parsed;
-      const imported: Project = { ...projectOnly };
-      // Importing the same file twice must not create two projects with one id
-      if (projects.some((p) => p.id === imported.id)) {
-        imported.id = `proj_${Date.now()}`;
-        imported.name = `${imported.name} (импорт)`;
-      }
-      const updated = [...projects, imported];
-      if (Array.isArray(importedPositions) && importedPositions.length > 0) {
-        await saveProjectProducts(imported.id, importedPositions as ProductItem[]);
-      }
-      saveProjectsToStorage(updated);
-      handleSelectProject(imported.id);
-      const { merged, added } = mergeMasterPrompts(masterPrompts, importedPrompts);
-      if (added > 0) handleSaveMasterPrompts(merged);
-      window.alert(
-        `Проект "${imported.name}" загружен.` +
-          (added > 0 ? ` Добавлено мастер-промптов: ${added}.` : importedPrompts ? '' : ' В этом файле нет мастер-промптов (он сохранён старой версией).')
-      );
-    } catch (err) {
-      window.alert('Ошибка при импорте файла проекта. Проверьте формат JSON.');
-    }
-    if (jsonInputRef.current) jsonInputRef.current.value = '';
-  };
-
-  // Add image button click
-  const handleAddImageClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  // Memory Management Handlers
-  const handleClearMemory = useCallback(() => {
-    clearAllMemory();
-  }, []);
-
-  const handleOptimizeMemory = useCallback(async () => {
-    setIsOptimizing(true);
-    try {
-      const res = await optimizeAllProjectsMemory();
-      const loaded = loadProjects();
-      setProjects(loaded);
-      const usage = getStorageUsage();
-      setStorageInfo(usage);
-      if (usage.percentage < 80) {
-        setStorageWarning(null);
-      }
-      if (parseFloat(res.freedMb) > 0 || res.freedBytes > 0) {
-        window.alert(`Освобождено ${res.freedMb} MB (${res.optimizedCards} фото пересохранено легче)`);
-      } else {
-        window.alert('Все изображения уже оптимизированы (до 500px, quality 0.7). Освобождено 0.00 MB');
-      }
-    } catch (err) {
-      console.error('Failed to optimize memory:', err);
-      window.alert('Ошибка при оптимизации изображений');
-    } finally {
-      setIsOptimizing(false);
-    }
-  }, []);
-
-  // Positions belong to the active project: load them whenever the project changes
-  const projectsRef = useRef(projects);
-  projectsRef.current = projects;
-  useEffect(() => {
-    if (!isHydrated || !activeProjectId) return;
-    let alive = true;
-    setProductsList([]);
-    loadProjectProducts(activeProjectId, projectsRef.current).then((list) => {
-      if (alive) setProductsList(list);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [activeProjectId, isHydrated]);
-
-  // Save positions of the active project
-  const handleSaveProducts = useCallback(
-    (newProducts: ProductItem[]) => {
-      undo.record({ kind: 'products', scope: activeProjectId, state: latestProductsRef.current });
-      setProductsList(newProducts);
-      saveProjectProducts(activeProjectId, newProducts);
-    },
-    [activeProjectId, undo]
-  );
-
-  // «перенести в проект…»: the ticked positions leave this project and join another one
-  const handleMoveProductsToProject = useCallback(
-    async (ids: string[], targetProjectId: string) => {
-      if (!targetProjectId || targetProjectId === activeProjectId) return;
-      const moving = productsList.filter((p) => ids.includes(p.id));
-      await appendProductsToProject(targetProjectId, moving, projects);
-      handleSaveProducts(productsList.filter((p) => !ids.includes(p.id)));
-    },
-    [activeProjectId, productsList, projects, handleSaveProducts]
-  );
-
-  // Add product photo from library to canvas
-  const handleAddProductToCanvas = useCallback(
-    async (product: ProductItem) => {
-      if (!product.photoDataUrl) return;
-      const currentCards = activeProject.cards || [];
-      const startX = activeProject.pan ? -activeProject.pan.x / (activeProject.zoom || 1) + 200 : 200;
-      const startY = activeProject.pan ? -activeProject.pan.y / (activeProject.zoom || 1) + 150 : 150;
-
-      const newCard: Card = {
-        id: `card_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-        name: product.name || 'Товар',
-        src: product.photoDataUrl,
-        x: Math.round(startX + (currentCards.length % 5) * 40),
-        y: Math.round(startY + (currentCards.length % 5) * 40),
-        width: 220,
-        height: 220,
-      };
-
-      const updatedCards = [...currentCards, newCard];
-      const updatedProjects = projects.map((p) =>
-        p.id === activeProject.id ? { ...p, cards: updatedCards, updatedAt: Date.now() } : p
-      );
-      saveProjectsToStorage(updatedProjects);
-      setSelectedCardIds(new Set([newCard.id]));
-    },
-    [activeProject, projects, saveProjectsToStorage]
-  );
-
-  // Grouping handlers
-  const handleGroupSelected = useCallback(() => {
-    const selectedCards = (activeProject.cards || []).filter((c) => selectedCardIds.has(c.id));
-    if (selectedCards.length === 0) {
-      window.alert('Выберите хотя бы одну карточку для группировки');
-      return;
-    }
-
-    const existingGroups = activeProject.groups || [];
-    const newGroupId = `group_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-    const groupColors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
-    const color = groupColors[existingGroups.length % groupColors.length];
-
-    const selectedIds: string[] = Array.from(selectedCardIds);
-
-    // Remove these cards from any existing groups first
-    const cleanedGroups = existingGroups
-      .map((g) => ({
-        ...g,
-        children: g.children.filter((cid) => !selectedCardIds.has(cid)),
-      }))
-      .filter((g) => g.children.length > 0);
-
-    const newGroup: CardGroup = {
-      id: newGroupId,
-      type: 'group',
-      name: `Группа ${existingGroups.length + 1}`,
-      children: selectedIds,
-      x: 0,
-      y: 0,
-      width: 0,
-      height: 0,
-      color,
-    };
-
-    const updatedProjects = projects.map((p) =>
-      p.id === activeProject.id
-        ? { ...p, groups: [...cleanedGroups, newGroup], updatedAt: Date.now() }
-        : p
-    );
-    saveProjectsToStorage(updatedProjects);
-  }, [activeProject, selectedCardIds, projects, saveProjectsToStorage]);
-
-  const handleUngroup = useCallback(
-    (groupId: string) => {
-      const updatedGroups = (activeProject.groups || []).filter((g) => g.id !== groupId);
-      const updatedProjects = projects.map((p) =>
-        p.id === activeProject.id
-          ? { ...p, groups: updatedGroups, updatedAt: Date.now() }
-          : p
-      );
-      saveProjectsToStorage(updatedProjects);
-    },
-    [activeProject, projects, saveProjectsToStorage]
-  );
-
-  const handleRenameGroup = useCallback(
-    (groupId: string, name: string) => {
-      const clean = name.trim();
-      if (!clean) return;
-      saveProjectsToStorage(
-        projects.map((p) =>
-          p.id === activeProject.id
-            ? { ...p, groups: (p.groups || []).map((g) => (g.id === groupId ? { ...g, name: clean } : g)), updatedAt: Date.now() }
-            : p
-        )
-      );
-    },
-    [activeProject, projects, saveProjectsToStorage]
-  );
-
-  // ---- Board → positions / catalog ----
-  /** Left to right, row by row, the way the photos are laid out */
-  const readingOrder = (cards: Card[]) =>
-    [...cards].sort((a, b) => Math.round(a.y / 160) - Math.round(b.y / 160) || a.x - b.x);
-  const groupOfCard = (cardId: string) => (activeProject.groups || []).find((g) => g.children.includes(cardId));
-
-  /** 'each': one position per photo. 'one': one position, first photo = original, the rest = angles */
-  const handleCardsToPositions = useCallback(
-    async (cardIds: string[], mode: 'each' | 'one', name?: string) => {
-      const cards = readingOrder((activeProject.cards || []).filter((c) => cardIds.includes(c.id) && c.src));
-      if (cards.length === 0) return;
-      const photos = await Promise.all(cards.map((c) => compressImageDataUrl(c.src, 1200, 0.85)));
-      const id = (n: number) => `prod_${Date.now()}_${n}_${Math.random().toString(36).slice(2, 6)}`;
-      let fresh: ProductItem[];
-      if (mode === 'one') {
-        const g = groupOfCard(cards[0].id);
-        fresh = [
-          {
-            id: id(0),
-            name: name || g?.name || cards[0].name || 'Товар',
-            photoDataUrl: photos[0],
-            variants: photos.slice(1),
-          },
-        ];
-        if (photos.length > 1) ensureVariantCols(photos.length - 1);
-      } else {
-        fresh = cards.map((c, i) => ({ id: id(i), name: c.name || `Фото ${i + 1}`, photoDataUrl: photos[i], category: groupOfCard(c.id)?.name }));
-      }
-      handleSaveProducts([...latestProductsRef.current, ...fresh]);
-      setIsProductLibraryOpen(true);
-      setFolderImportStatus(
-        mode === 'one' ? `В позиции: «${fresh[0].name}», фото ${photos.length} (первое — исходник, остальные — ракурсы).` : `В позиции добавлено ${fresh.length}.`
-      );
-      setTimeout(() => setFolderImportStatus(null), 6000);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeProject, handleSaveProducts]
-  );
-
-  // ---- «Оси»: grids on the board ----
-  const patchActive = useCallback(
-    (fn: (p: Project) => Project) => {
-      saveProjectsToStorage(latestProjectsRef.current.map((p) => (p.id === activeProjectId ? { ...fn(p), updatedAt: Date.now() } : p)));
-    },
-    [activeProjectId, saveProjectsToStorage]
-  );
-  const withMatrix = useCallback(
-    (id: string, fn: (m: BoardMatrix, cards: Card[]) => { matrix: BoardMatrix | null; cards?: Card[] }) =>
-      patchActive((p) => {
-        const m = (p.matrices || []).find((x) => x.id === id);
-        if (!m) return p;
-        const r = fn(m, p.cards || []);
-        const matrices = r.matrix ? (p.matrices || []).map((x) => (x.id === id ? r.matrix! : x)) : (p.matrices || []).filter((x) => x.id !== id);
-        return { ...p, matrices, cards: r.cards || p.cards };
-      }),
-    [patchActive]
-  );
-  const matrixDragRef = useRef<{ id: string; m: BoardMatrix; cards: Map<string, { x: number; y: number }> } | null>(null);
-  const handleMatrixToPositions = useCallback(
-    (id: string) => {
-      const p = latestProjectsRef.current.find((x) => x.id === activeProjectId);
-      const m = p?.matrices?.find((x) => x.id === id);
-      if (!p || !m) return;
-      // a photo that came from a position cell goes back at full size
-      const fullSize = (card: Card) => {
-        if (!card.fromSlot) return undefined;
-        const prod = latestProductsRef.current.find((x) => x.id === card.fromSlot!.productId);
-        return prod ? slotGet(prod, card.fromSlot.slot) || undefined : undefined;
-      };
-      const drafts = matrixToPositionDrafts(m, p.cards || [], fullSize);
-      if (drafts.length === 0) return;
-      (async () => {
-        const fresh: ProductItem[] = [];
-        let next = [...latestProductsRef.current];
-        let updated = 0;
-        let n = 0;
-        for (const d of drafts) {
-          const photo = await compressImageDataUrl(d.photoDataUrl, 1200, 0.85);
-          const variants = await Promise.all((d.variants || []).map((v) => (v ? compressImageDataUrl(v, 1200, 0.85) : Promise.resolve(null))));
-          const { productId, ...draft } = d;
-          const existing = m.linked && productId ? next.findIndex((x) => x.id === productId) : -1;
-          if (existing >= 0) {
-            // tied to a position: update it in place (same id, group, code, price)
-            next[existing] = { ...next[existing], name: draft.name || next[existing].name, photoDataUrl: photo, variants, finalIndex: undefined };
-            updated++;
-          } else {
-            fresh.push({ ...draft, id: `prod_${Date.now()}_${n++}_${Math.random().toString(36).slice(2, 6)}`, photoDataUrl: photo, variants, category: m.name && m.name !== 'Оси' && m.name !== 'Позиции' ? m.name : undefined });
-          }
-        }
-        next = [...next, ...fresh];
-        const maxVariants = Math.max(0, ...next.map((f) => f.variants?.length || 0));
-        if (maxVariants) ensureVariantCols(maxVariants);
-        handleSaveProducts(next);
-        setIsProductLibraryOpen(true);
-        setFolderImportStatus(`Из осей в позиции: обновлено ${updated}, новых ${fresh.length}. Ракурсы легли в колонки по порядку.`);
-        setTimeout(() => setFolderImportStatus(null), 6000);
-      })();
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeProjectId, handleSaveProducts]
-  );
-  const matrixApi: MatrixApi = useMemo(
-    () => ({
-      update: (m) => withMatrix(m.id, () => ({ matrix: m })),
-      remove: (id) => withMatrix(id, () => ({ matrix: null })),
-      transpose: (id) => withMatrix(id, (m, cards) => transposeMatrix(m, cards)),
-      toPositions: handleMatrixToPositions,
-      addLine: (id, axis) => withMatrix(id, (m) => ({ matrix: addLine(m, axis) })),
-      removeLine: (id, axis, idx) => withMatrix(id, (m, cards) => removeLine(m, axis, idx, cards)),
-      drag: (id, dx, dy, phase) => {
-        const p = latestProjectsRef.current.find((x) => x.id === activeProjectId);
-        if (phase === 'start') {
-          const m = p?.matrices?.find((x) => x.id === id);
-          if (!m || !p) return;
-          const members = membersOf(m, p.cards || []);
-          matrixDragRef.current = { id, m, cards: new Map((p.cards || []).filter((c) => members.has(c.id)).map((c) => [c.id, { x: c.x, y: c.y }])) };
-          return;
-        }
-        const start = matrixDragRef.current;
-        if (!start || start.id !== id) return;
-        withMatrix(id, (_m, cards) => ({
-          matrix: { ...start.m, x: Math.round(start.m.x + dx), y: Math.round(start.m.y + dy) },
-          cards: cards.map((c) => {
-            const o = start.cards.get(c.id);
-            return o ? { ...c, x: Math.round(o.x + dx), y: Math.round(o.y + dy) } : c;
-          }),
-        }));
-        if (phase === 'end') matrixDragRef.current = null;
-      },
-    }),
-    [withMatrix, handleMatrixToPositions, activeProjectId]
-  );
-  /** Positions → «Оси» on the board. Products already in a linked grid are skipped; new ones are added as lines */
-  const handleShowPositionsOnBoard = useCallback(
-    (ids?: string[]) => {
-      // wait a tick: right after an import the new positions are still on their way into state
-      setTimeout(async () => {
-        const p = latestProjectsRef.current.find((x) => x.id === activeProjectId);
-        if (!p) return;
-        const linked = (p.matrices || []).find((m) => m.linked);
-        const onBoard = new Set((p.matrices || []).flatMap((m) => (m.lineProductIds || []).filter(Boolean) as string[]));
-        const products = latestProductsRef.current.filter((x) => x.photoDataUrl && (!ids || ids.includes(x.id)) && !onBoard.has(x.id));
-        if (products.length === 0) {
-          setFolderImportStatus('Эти позиции уже на доске в осях.');
-          setTimeout(() => setFolderImportStatus(null), 4000);
-          return;
-        }
-        // card shapes need the photos' proportions
-        const ratios = new Map<string, number>();
-        await Promise.all(
-          products.flatMap((x) => [x.photoDataUrl, ...(x.variants || [])]).filter(Boolean).map(
-            (src) =>
-              new Promise<void>((resolve) => {
-                const img = new Image();
-                img.onload = () => {
-                  ratios.set(src as string, (img.naturalHeight || 1) / (img.naturalWidth || 1));
-                  resolve();
-                };
-                img.onerror = () => resolve();
-                img.src = src as string;
-              })
-          )
-        );
-        const ratioOf = (src: string) => ratios.get(src) || 1;
-        patchActive((proj) => {
-          const cardsNow = proj.cards || [];
-          if (linked && linked.productsAlong === 'rows') {
-            // add the new products as lines of the existing grid
-            const fresh = matrixFromPositions(linked.x, linked.y + linked.rows.length * linked.cellH, products, ratioOf);
-            const cols = Math.max(linked.cols.length, fresh.matrix.cols.length);
-            const matrix: BoardMatrix = {
-              ...linked,
-              rows: [...linked.rows, ...fresh.matrix.rows],
-              cols: Array.from({ length: cols }, (_, i) => linked.cols[i] || fresh.matrix.cols[i]),
-              lineProductIds: [...(linked.lineProductIds || linked.rows.map(() => null)), ...products.map((x) => x.id)],
-            };
-            return { ...proj, matrices: (proj.matrices || []).map((m) => (m.id === linked.id ? matrix : m)), cards: [...cardsNow, ...fresh.cards] };
-          }
-          // a new grid under everything on the board
-          const minX = cardsNow.length ? Math.min(...cardsNow.map((c) => c.x)) : 0;
-          const maxY = cardsNow.length ? Math.max(...cardsNow.map((c) => c.y + (c.height || 300))) : 0;
-          const { matrix, cards } = matrixFromPositions(Math.round(minX + 200), Math.round(maxY + 200), products, ratioOf);
-          const zoom = proj.zoom || 1;
-          const pan = cardsNow.length ? proj.pan : { x: Math.round(40 + 200 * zoom - matrix.x * zoom), y: Math.round(90 - matrix.y * zoom) };
-          return { ...proj, pan, matrices: [...(proj.matrices || []), matrix], cards: [...cardsNow, ...cards] };
-        });
-        setFolderImportStatus(`На доске в осях: ${products.length} позиций.`);
-        setTimeout(() => setFolderImportStatus(null), 5000);
-      }, 60);
-    },
-    [activeProjectId, patchActive]
-  );
-  showOnBoardRef.current = handleShowPositionsOnBoard;
-
-  /** «разрезать на товары»: find each product on the photo and lay the cut-outs next to it, as one group */
-  const handleCutCard = useCallback(
-    async (card: Card) => {
-      if (!hasGenerationAccess()) {
-        setIsSettingsOpen(true);
-        return;
-      }
-      setFolderImportStatus(`Ищу товары на «${card.name || 'фото'}»…`);
-      try {
-        const found = await detectProducts(card.src);
-        if (found.length < 2) {
-          setFolderImportStatus(found.length ? 'Нашёлся один товар — резать нечего.' : 'Товаров на фото не нашлось.');
-          setTimeout(() => setFolderImportStatus(null), 5000);
-          return;
-        }
-        const pieces = await cropProducts(card.src, found);
-        patchActive((proj) => {
-          let z = (proj.cards || []).reduce((m, c) => Math.max(m, c.zIndex || 1), 1);
-          let x = card.x + card.width + 80;
-          const cards: Card[] = pieces.map((piece, i) => {
-            const w = 180;
-            const h = Math.round(w * (piece.h / piece.w));
-            const c: Card = {
-              id: `card_cut_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
-              x: Math.round(x),
-              y: Math.round(card.y),
-              width: w,
-              height: h,
-              src: piece.src,
-              name: piece.label,
-              aspectRatio: w / h,
-              zIndex: ++z,
-            };
-            x += w + 24;
-            return c;
-          });
-          const group: CardGroup = {
-            id: `group_cut_${Date.now()}`,
-            type: 'group',
-            name: `${card.name || 'фото'} · товары`,
-            children: cards.map((c) => c.id),
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
-            color: '#0a0a0a',
-          };
-          return { ...proj, cards: [...(proj.cards || []), ...cards], groups: [...(proj.groups || []), group] };
-        });
-        setFolderImportStatus(`Вырезано товаров: ${pieces.length}. Дальше можно «в каталог» или «в позиции».`);
-        setTimeout(() => setFolderImportStatus(null), 6000);
-      } catch (err) {
-        setFolderImportStatus(`Не получилось разрезать: ${err instanceof Error ? err.message : String(err)}`);
-        setTimeout(() => setFolderImportStatus(null), 7000);
-      }
-    },
-    [patchActive]
-  );
-
-  /** A photo dragged out of a position cell onto the board */
-  const handleDropSlot = useCallback(
-    (ref: { id: string; slot: number }, pos: { x: number; y: number }) => {
-      const prod = latestProductsRef.current.find((x) => x.id === ref.id);
-      const src = prod ? slotGet(prod, ref.slot) : '';
-      if (!prod || !src) return;
-      const img = new Image();
-      img.onload = () => {
-        const w = 220;
-        const h = Math.round(w * ((img.naturalHeight || 1) / (img.naturalWidth || 1)));
-        patchActive((proj) => {
-          const z = (proj.cards || []).reduce((m, c) => Math.max(m, c.zIndex || 1), 1) + 1;
-          const card: Card = {
-            id: `card_slot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-            x: Math.round(pos.x),
-            y: Math.round(pos.y),
-            width: w,
-            height: h,
-            src,
-            name: [prod.name, angleOf(prod, ref.slot)].filter(Boolean).join(' · '),
-            aspectRatio: w / h,
-            zIndex: z,
-            fromSlot: { productId: prod.id, slot: ref.slot },
-          };
-          return { ...proj, cards: [...(proj.cards || []), card] };
-        });
-      };
-      img.src = src;
-    },
-    [patchActive]
-  );
-
-  const handleAddMatrix = useCallback(
-    (at: { x: number; y: number }) =>
-      patchActive((p) => ({ ...p, matrices: [...(p.matrices || []), newMatrix(Math.round(at.x + MATRIX_LABEL_W), Math.round(at.y + MATRIX_LABEL_H + 30))] })),
-    [patchActive]
-  );
-  /** Selected photos → a grid: each group (or each loose photo) becomes a product line */
-  const handleCardsToMatrix = useCallback(
-    (cardIds: string[]) =>
-      patchActive((p) => {
-        const sel = readingOrder((p.cards || []).filter((c) => cardIds.includes(c.id)));
-        if (sel.length === 0) return p;
-        const lines: { name: string; cards: Card[] }[] = [];
-        const byGroup = new Map<string, { name: string; cards: Card[] }>();
-        sel.forEach((c) => {
-          const g = (p.groups || []).find((x) => x.children.includes(c.id));
-          if (g) {
-            if (!byGroup.has(g.id)) {
-              const line = { name: g.name || 'Товар', cards: [] as Card[] };
-              byGroup.set(g.id, line);
-              lines.push(line);
-            }
-            byGroup.get(g.id)!.cards.push(c);
-          } else lines.push({ name: c.name || `Товар ${lines.length + 1}`, cards: [c] });
-        });
-        const minX = Math.min(...sel.map((c) => c.x));
-        const maxY = Math.max(...(p.cards || []).map((c) => c.y + (c.height || 300)));
-        const { matrix, cards } = matrixFromGroups(Math.round(minX + 200), Math.round(maxY + 160), lines);
-        const placed = new Map(cards.map((c) => [c.id, c]));
-        // A group that went into the grid whole is now a product line: the line keeps its name, the frame goes
-        const groups = (p.groups || []).filter((g) => !g.children.every((id) => placed.has(id)));
-        // Bring the grid into view: its top-left corner near the top-left of the screen
-        const zoom = p.zoom || 1;
-        const pan = { x: Math.round(40 + MATRIX_LABEL_W * zoom - matrix.x * zoom), y: Math.round(70 + MATRIX_LABEL_H * zoom - matrix.y * zoom) };
-        return { ...p, groups, pan, matrices: [...(p.matrices || []), matrix], cards: (p.cards || []).map((c) => placed.get(c.id) || c) };
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [patchActive]
-  );
-  /** Photos let go over a grid snap into its cells */
-  const handleCardsDragEnd = useCallback(
-    (ids: string[]) => {
-      setTimeout(() => {
-        const p = latestProjectsRef.current.find((x) => x.id === activeProjectId);
-        if (!p?.matrices?.length) return;
-        let cards = p.cards || [];
-        let changed = false;
-        const matrices = p.matrices.map((m) => {
-          const moved = cards.filter((c) => ids.includes(c.id) && isOverMatrix(m, c)).map((c) => c.id);
-          if (moved.length === 0) return m;
-          changed = true;
-          const r = snapIntoMatrix(m, cards, moved);
-          cards = r.cards;
-          return r.matrix;
-        });
-        if (changed) patchActive((x) => ({ ...x, matrices, cards }));
-      }, 40);
-    },
-    [activeProjectId, patchActive]
-  );
-
   const [catalogProgress, setCatalogProgress] = useState<{ done: number; total: number } | null>(null);
   const [catalogIncoming, setCatalogIncoming] = useState<{ key: number; items: { name: string; src: string }[] } | null>(null);
-  const handleCardsToCatalog = useCallback(
-    (cardIds: string[]) => {
-      const cards = readingOrder((activeProject.cards || []).filter((c) => cardIds.includes(c.id) && c.src));
-      if (cards.length === 0) return;
-      setCatalogIncoming({ key: Date.now(), items: cards.map((c) => ({ name: c.name || 'фото', src: c.src })) });
-      setStudioView('catalog');
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeProject, setStudioView]
-  );
 
-  // Style Analysis Handlers (gemini-2.5-flash)
-  const handleAnalyzeStyle = useCallback(async () => {
-    const apiKey = getStoredApiKey();
-    if (!hasGenerationAccess()) {
-      setIsSettingsOpen(true);
-      return;
-    }
+  // Tabs, the right dock (products / AI / menu), the projects column and hidden top-bar tools.
+  const {
+    DOCK_MIN,
+    dockOpen,
+    dockRef,
+    dropFromDock,
+    fileInputRef,
+    jsonInputRef,
+    resizeDock,
+    resizeSidebar,
+    setStudioView,
+    siteMockupInputRef,
+    toggleSidebar,
+    toggleTool,
+  } = useStudioLayout({
+    dockOrder,
+    isGenerationOpen,
+    isProductLibraryOpen,
+    isRightDrawerOpen,
+    setDockOrder,
+    setDockWidths,
+    setHiddenTools,
+    setIsGenerationOpen,
+    setIsMasterPromptsOpen,
+    setIsMobileSidebarOpen,
+    setIsProductLibraryOpen,
+    setIsRightDrawerOpen,
+    setIsSidebarCollapsed,
+    setIsStyleAnalysisOpen,
+    setSidebarWidth,
+    setStudioViewState,
+  });
 
-    const selectedCards = (activeProject.cards || []).filter((c) => selectedCardIds.has(c.id));
-    if (selectedCards.length === 0) {
-      window.alert('Пожалуйста, выделите от 1 до 5 карточек-изображений на канвасе для анализа стиля.');
-      return;
-    }
-    const n = Math.min(5, selectedCards.length);
-    if (
-      !window.confirm(
-        `Описать стиль ${n} фото${selectedCards.length > 5 ? ' (первых пяти)' : ''}?\n\nМодель посмотрит на них и положит описание заметкой рядом. Это один запрос к Gemini.`
-      )
-    )
-      return;
-    const projectId = activeProject.id;
+  // Loading from IndexedDB, saving with undo, projects, notes and the small board toggles.
+  const {
+    activeProject,
+    handleAddNote,
+    handleCreateProject,
+    handleDeleteNote,
+    handleDeleteProject,
+    handleDetachNote,
+    handleLogoClick,
+    handleRenameProject,
+    handleSaveMasterPrompts,
+    handleSelectProject,
+    handleToggleConnectionMode,
+    handleUpdateCards,
+    handleUpdateNoteColor,
+    handleUpdateNoteSize,
+    handleUpdateNoteText,
+    handleUpdateNotes,
+    handleUpdatePanZoom,
+    latestProductsRef,
+    latestProjectsRef,
+    masterPromptsRef,
+    saveProjectsToStorage,
+  } = useProjectData({
+    activeProjectId,
+    masterPrompts,
+    productsList,
+    projects,
+    setActiveProjectIdState,
+    setConnectingSourceCardId,
+    setIsConnectionMode,
+    setIsExportModalOpen,
+    setIsGenerationOpen,
+    setIsHydrated,
+    setIsMasterPromptsOpen,
+    setIsProductLibraryOpen,
+    setIsRightDrawerOpen,
+    setIsSettingsOpen,
+    setIsShortcutsOpen,
+    setIsStyleAnalysisOpen,
+    setMasterPrompts,
+    setProjects,
+    setSelectedCardIds,
+    setSelectedConnectionId,
+    setSelectedNoteIds,
+    setStorageInfo,
+    undo,
+  });
 
-    const cardsToAnalyze = selectedCards.slice(0, 5);
-    setIsStyleAnalysisOpen(true);
-    setIsAnalyzingStyle(true);
-    setStyleAnalysisTags('');
+  // Photos and folders coming in: crop queue, folder → board / positions, products dropped on the board.
+  const {
+    askAboutFolder,
+    folderInputRef,
+    handleAddFolder,
+    handleAddImages,
+    handleApplyCropToAllRemaining,
+    handleCancelCanvasCrop,
+    handleDropProducts,
+    handleFolderInputChange,
+    handleGenerateSample,
+    handleImportFolderAsProducts,
+    handleSaveCanvasCrop,
+    handleSkipAllAndImportOriginals,
+    handleSkipCurrentCanvasCrop,
+    pickFolder,
+    showOnBoardRef,
+  } = useImageImport({
+    activeProject,
+    activeProjectId,
+    canvasCropIndex,
+    canvasCropQueue,
+    handleUpdateCards,
+    pendingCanvasCards,
+    productsList,
+    projects,
+    saveProjectsToStorage,
+    setCanvasCropIndex,
+    setCanvasCropQueue,
+    setFolderImportStatus,
+    setIsProductLibraryOpen,
+    setPendingCanvasCards,
+    setPendingFolder,
+    setProductsList,
+    setSelectedCardIds,
+    setSelectedNoteIds,
+    setStorageWarning,
+  });
 
-    try {
-      const tags = await analyzeStyleWithGemini(apiKey, cardsToAnalyze);
-      setStyleAnalysisTags(tags);
+  // Board edits: links, deleting, duplicating, groups, notes that go into prompts, site mockup, export.
+  const {
+    consideredNotes,
+    handleAddConnection,
+    handleAddSiteMockupClick,
+    handleChangeSiteMockupOpacity,
+    handleClearAll,
+    handleDeleteCard,
+    handleDeleteConnection,
+    handleDeleteSelection,
+    handleDeleteSiteMockup,
+    handleDuplicateCard,
+    handleExportImages,
+    handleGroupSelected,
+    handleRenameGroup,
+    handleSiteMockupFileChange,
+    handleUngroup,
+    handleUpdateSiteMockup,
+  } = useBoardEditing({
+    activeProject,
+    activeProjectId,
+    handleUpdateCards,
+    handleUpdateNotes,
+    projects,
+    saveProjectsToStorage,
+    selectedCardIds,
+    selectedConnectionId,
+    selectedNoteIds,
+    setSelectedCardIds,
+    setSelectedConnectionId,
+    setSelectedNoteIds,
+    siteMockupInputRef,
+  });
 
-      // Keep the result on the board as a note next to the analysed photos, so it doesn't vanish with the window
-      const maxRight = Math.max(...cardsToAnalyze.map((c) => c.x + c.width));
-      const minTop = Math.min(...cardsToAnalyze.map((c) => c.y));
-      const styleNote: Note = {
-        id: `note_style_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-        x: Math.round(maxRight + 24),
-        y: Math.round(minTop),
-        width: 220,
-        height: 160,
-        text: `Стиль (${cardsToAnalyze.length} фото): ${tags}`,
-        color: 'blue',
-        attachedTo: null,
-        projectId: activeProject.id,
-        zIndex: 20,
-      };
-      // Into the newest state: generations may have finished while the model was looking
-      saveProjectsToStorage(
-        latestProjectsRef.current.map((p) =>
-          p.id === projectId ? { ...p, notes: [...(p.notes || []), styleNote], updatedAt: Date.now() } : p
-        )
-      );
-    } catch (err: any) {
-      console.error('Style analysis error:', err);
-      setStyleAnalysisTags(`Ошибка: ${err?.message || 'Не удалось проанализировать стиль'}`);
-    } finally {
-      setIsAnalyzingStyle(false);
-    }
-  }, [activeProject, selectedCardIds, saveProjectsToStorage]);
+  // Gemini: one shot per selected product (references by «берём:» roles), «править», «Стиль».
+  const {
+    examplePromptNames,
+    handleAnalyzeStyle,
+    handleChangeCardTakes,
+    handleEditCard,
+    handleMakeExampleFromCard,
+    handleSaveStyleAsMasterPrompt,
+    handleTriggerGeminiGeneration,
+    handleUseStyleInGeneration,
+    quickEditPrompts,
+  } = useGeneration({
+    activeProject,
+    activeProjectId,
+    consideredNotes,
+    handleSaveMasterPrompts,
+    handleUpdateCards,
+    latestProjectsRef,
+    masterPrompts,
+    masterPromptsRef,
+    projects,
+    saveProjectsToStorage,
+    selectedCardIds,
+    setActiveGenerations,
+    setCurrentPromptPreset,
+    setFolderImportStatus,
+    setGeneratingCardIds,
+    setGenerationError,
+    setIsAnalyzingStyle,
+    setIsGenerationOpen,
+    setIsSettingsOpen,
+    setIsStyleAnalysisOpen,
+    setSelectedCardIds,
+    setSelectedNoteIds,
+    setStyleAnalysisTags,
+  });
 
-  const handleSaveStyleAsMasterPrompt = useCallback(
-    (tagsText: string) => {
-      const newPrompt: MasterPrompt = {
-        id: `mp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-        name: `Стиль из ${selectedCardIds.size || 1} референсов`,
-        prompt: tagsText,
-        tags: ['Стиль', 'Анализ'],
-        category: 'Мои',
-        projectId: activeProject.id,
-        createdAt: Date.now(),
-      };
-      const updated = [newPrompt, ...masterPrompts];
-      handleSaveMasterPrompts(updated);
-    },
-    [selectedCardIds, masterPrompts, handleSaveMasterPrompts, activeProject.id]
-  );
+  // Project copy (.json) in and out, image picker button, memory clean-up.
+  const {
+    handleAddImageClick,
+    handleClearMemory,
+    handleExportProject,
+    handleImportProjectClick,
+    handleJsonFileChange,
+    handleOptimizeMemory,
+  } = useProjectFiles({
+    activeProject,
+    fileInputRef,
+    handleSaveMasterPrompts,
+    handleSelectProject,
+    jsonInputRef,
+    masterPrompts,
+    productsList,
+    projects,
+    saveProjectsToStorage,
+    setIsOptimizing,
+    setProjects,
+    setStorageInfo,
+    setStorageWarning,
+  });
 
-  const handleUseStyleInGeneration = useCallback((tagsText: string) => {
-    setCurrentPromptPreset(tagsText);
-    setIsGenerationOpen(true);
-    setIsStyleAnalysisOpen(false);
-  }, []);
+  // Positions of the active project, axes on the board, «разрезать», board → positions / catalog.
+  const {
+    handleAddMatrix,
+    handleAddProductToCanvas,
+    handleCardsDragEnd,
+    handleCardsToCatalog,
+    handleCardsToMatrix,
+    handleCardsToPositions,
+    handleCutCard,
+    handleDropCardsOnPosition,
+    handleDropSlot,
+    handleMoveProductsToProject,
+    handleSaveProducts,
+    handleShowPositionsOnBoard,
+    matrixApi,
+  } = usePositionsAndAxes({
+    activeProject,
+    activeProjectId,
+    isHydrated,
+    latestProductsRef,
+    latestProjectsRef,
+    productsList,
+    projects,
+    saveProjectsToStorage,
+    setCatalogIncoming,
+    setFolderImportStatus,
+    setIsProductLibraryOpen,
+    setIsSettingsOpen,
+    setProductsList,
+    setSelectedCardIds,
+    setStudioView,
+    showOnBoardRef,
+    undo,
+  });
 
-  // Board photos dropped on a position: into the given slot, or the first free one (original first, then variants)
-  const handleDropCardsOnPosition = useCallback(
-    (cardIds: string[], positionId: string, slot?: number) => {
-      const srcs = cardIds
-        .map((id) => (activeProject.cards || []).find((c) => c.id === id)?.src)
-        .filter((src): src is string => Boolean(src));
-      if (srcs.length === 0) return;
-      const next = productsList.map((p) => {
-        if (p.id !== positionId) return p;
-        let photo = p.photoDataUrl;
-        const variants = [...(p.variants || [])];
-        const queue = [...srcs];
-        if (slot === -1) photo = queue.shift() || photo;
-        else if (slot !== undefined && slot >= 0) {
-          variants[slot] = queue.shift() || variants[slot];
-        } else if (!photo) photo = queue.shift() || photo;
-        // The rest fill free variant columns, then new ones
-        for (const src of queue) {
-          const free = variants.findIndex((v) => !v);
-          if (free >= 0) variants[free] = src;
-          else variants.push(src);
-        }
-        return { ...p, photoDataUrl: photo, variants };
-      });
-      handleSaveProducts(next);
-    },
-    [activeProject.cards, productsList, handleSaveProducts]
-  );
-
-  // What to take from a reference photo (фон, свет, ракурс…)
-  const handleChangeCardTakes = useCallback(
-    (cardId: string, takes: string[]) => {
-      handleUpdateCards((activeProject.cards || []).map((c) => (c.id === cardId ? { ...c, takes } : c)));
-    },
-    [activeProject.cards, handleUpdateCards]
-  );
-
-  // «править» on one photo: edit it by words (or by a «Исходник» prompt); the result appears next to it
-  const handleEditCard = useCallback(
-    (cardId: string, instruction: string, promptName?: string) => {
-      const card = (activeProject.cards || []).find((c) => c.id === cardId);
-      const text = instruction.trim();
-      if (!card || !text) return;
-      const prompt = text.includes(SOURCE_FIX_MARKER) ? text : `${SOURCE_FIX_MARKER} ${text}`;
-      handleTriggerGeminiGeneration(prompt, { sourceCards: [card], masterPromptName: promptName });
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeProject.cards, projects, activeProjectId]
-  );
-  /** Names of master prompts: a photo made with one of them can become its example */
-  const examplePromptNames = useMemo(() => new Set(masterPrompts.map((mp) => mp.name)), [masterPrompts]);
-  const quickEditPrompts = useMemo(() => masterPrompts.filter((mp) => mp.prompt.includes(SOURCE_FIX_MARKER)), [masterPrompts]);
-
-  // The selection is exactly one existing group → the top-bar cell ungroups it
-  const selectedGroup = useMemo(() => {
-    if (selectedCardIds.size === 0) return undefined;
-    return (activeProject.groups || []).find(
-      (g) => g.children.length === selectedCardIds.size && g.children.every((id) => selectedCardIds.has(id))
-    );
-  }, [activeProject.groups, selectedCardIds]);
-
-  // ⌘G groups the selection, ⇧⌘G ungroups the group it belongs to
-  const groupKeysRef = useRef({ group: handleGroupSelected, ungroup: handleUngroup, groups: activeProject.groups, sel: selectedCardIds });
-  groupKeysRef.current = { group: handleGroupSelected, ungroup: handleUngroup, groups: activeProject.groups, sel: selectedCardIds };
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'g') return;
-      const t = e.target as HTMLElement;
-      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
-      const { group, ungroup, groups, sel } = groupKeysRef.current;
-      if (sel.size === 0) return;
-      e.preventDefault();
-      if (e.shiftKey) {
-        const g = (groups || []).find((x) => x.children.some((id) => sel.has(id)));
-        if (g) ungroup(g.id);
-      } else {
-        group();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  // ⌘A selects every photo on the board (only on the board, not while typing or inside a panel)
-  const selectAllRef = useRef({ view: studioView, cards: activeProject.cards });
-  selectAllRef.current = { view: studioView, cards: activeProject.cards };
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'a' || e.shiftKey || e.altKey) return;
-      const t = e.target as HTMLElement;
-      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
-      if (t.closest && t.closest('#studio-dock, #catalog-studio, [role="dialog"]')) return;
-      const { view, cards } = selectAllRef.current;
-      if (view !== 'board' || !cards?.length) return;
-      e.preventDefault();
-      setSelectedCardIds(new Set(cards.map((c) => c.id)));
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  // ⌘Z / Ctrl+Z steps back, ⇧⌘Z or ⌘Y forward. Text fields keep their own undo.
-  const undoStateRef = useRef({ activeProjectId, handleSaveProducts });
-  undoStateRef.current = { activeProjectId, handleSaveProducts };
-  const stepHistory = useCallback(
-    (direction: 'undo' | 'redo') =>
-      undo.step(direction, (entry) => {
-        if (entry.kind === 'board') {
-          const current = latestProjectsRef.current;
-          // The view (pan, zoom) is not part of history: keep where the user is looking now
-          const restored = (entry.state as Project[]).map((p) => {
-            const now = current.find((x) => x.id === p.id);
-            return now ? { ...p, pan: now.pan, zoom: now.zoom } : p;
-          });
-          setProjects(restored);
-          saveProjects(restored);
-          setSelectedCardIds(new Set());
-          setSelectedNoteIds(new Set());
-          return current;
-        }
-        if (entry.kind === 'products') {
-          const list = entry.state as ProductItem[];
-          if (entry.scope === undoStateRef.current.activeProjectId) {
-            const current = latestProductsRef.current;
-            setProductsList(list);
-            saveProjectProducts(entry.scope, list);
-            return current;
-          }
-          if (entry.scope) saveProjectProducts(entry.scope, list);
-          return undefined;
-        }
-        return undefined;
-      }),
-    [undo]
-  );
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      const key = e.key.toLowerCase();
-      const isUndo = (key === 'z' || key === 'я') && !e.shiftKey;
-      const isRedo = ((key === 'z' || key === 'я') && e.shiftKey) || key === 'y' || key === 'н';
-      if (!isUndo && !isRedo) return;
-      const t = e.target as HTMLElement;
-      if ((t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'checkbox') || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
-      e.preventDefault();
-      stepHistory(isUndo ? 'undo' : 'redo');
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [stepHistory]);
-
-  // ---- Copy / cut / paste of board photos and notes ----
-  // The studio keeps its own copy (names, roles, attached notes); the system clipboard gets the first photo
-  // as a picture for other apps, plus a marker so a paste back here uses the full copy.
-  const boardClipRef = useRef<{ id: string; cards: Card[]; notes: Note[]; pastes: number } | null>(null);
-  const clipStateRef = useRef({ activeProject, selectedCardIds, selectedNoteIds, handleDeleteSelection, handleUpdateCards, saveProjectsToStorage, projects, activeProjectId });
-  clipStateRef.current = { activeProject, selectedCardIds, selectedNoteIds, handleDeleteSelection, handleUpdateCards, saveProjectsToStorage, projects, activeProjectId };
-
-  useEffect(() => {
-    const isTyping = (t: EventTarget | null) => {
-      const el = t as HTMLElement | null;
-      return Boolean(el && ((el.tagName === 'INPUT' && (el as HTMLInputElement).type !== 'checkbox') || el.tagName === 'TEXTAREA' || el.isContentEditable));
-    };
-    const overPanel = () => Boolean(document.querySelector('#studio-dock:hover, #catalog-studio'));
-    const onCopyOrCut = (e: ClipboardEvent) => {
-      if (isTyping(e.target) || overPanel()) return;
-      const { activeProject: proj, selectedCardIds: sc, selectedNoteIds: sn, handleDeleteSelection: del } = clipStateRef.current;
-      const cards = (proj.cards || []).filter((c) => sc.has(c.id));
-      const notes = (proj.notes || []).filter((n) => sn.has(n.id) || (n.attachedTo && sc.has(n.attachedTo)));
-      if (cards.length === 0 && notes.length === 0) return;
-      e.preventDefault();
-      const id = Math.random().toString(36).slice(2, 10);
-      boardClipRef.current = { id, cards, notes, pastes: 0 };
-      e.clipboardData?.setData('text/plain', `aips-clip:${id}`);
-      if (cards[0]) copyPictureToSystem(cards[0].src, `aips-clip:${id}`);
-      if (e.type === 'cut') del(cards.map((c) => c.id), notes.map((n) => n.id));
-    };
-    document.addEventListener('copy', onCopyOrCut);
-    document.addEventListener('cut', onCopyOrCut);
-    return () => {
-      document.removeEventListener('copy', onCopyOrCut);
-      document.removeEventListener('cut', onCopyOrCut);
-    };
-  }, []);
-
-  /** Paste the studio's own copy: new ids, shifted a bit each time, attached notes follow their photo */
-  const pasteBoardClip = useCallback(() => {
-    const clip = boardClipRef.current;
-    if (!clip) return false;
-    const { projects: list, activeProjectId: pid, saveProjectsToStorage: save } = clipStateRef.current;
-    clip.pastes += 1;
-    const shift = 40 * clip.pastes;
-    const stamp = Date.now();
-    const idMap = new Map<string, string>();
-    const proj = list.find((p) => p.id === pid);
-    if (!proj) return false;
-    const topZ = (proj.cards || []).reduce((m, c) => Math.max(m, c.zIndex || 1), 1);
-    const newCards = clip.cards.map((c, i) => {
-      const nid = `card_${stamp}_${i}_${Math.random().toString(36).slice(2, 6)}`;
-      idMap.set(c.id, nid);
-      return { ...c, id: nid, x: c.x + shift, y: c.y + shift, zIndex: topZ + 1 + i };
-    });
-    const newNotes = clip.notes.map((n, i) => ({
-      ...n,
-      id: `note_${stamp}_${i}_${Math.random().toString(36).slice(2, 6)}`,
-      x: n.x + shift,
-      y: n.y + shift,
-      attachedTo: n.attachedTo ? idMap.get(n.attachedTo) || null : null,
-    }));
-    save(
-      list.map((p) =>
-        p.id === pid ? { ...p, cards: [...(p.cards || []), ...newCards], notes: [...(p.notes || []), ...newNotes], updatedAt: Date.now() } : p
-      )
-    );
-    setSelectedCardIds(new Set(newCards.map((c) => c.id)));
-    setSelectedNoteIds(new Set(newNotes.map((n) => n.id)));
-    return true;
-  }, []);
-
-  // Paste: a picture copied anywhere (Pinterest "Copy image", a screenshot) lands on the board with ⌘V / Ctrl+V
-  const handleAddImagesRef = useRef(handleAddImages);
-  handleAddImagesRef.current = handleAddImages;
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-      // Over the positions panel, the panel handles paste itself
-      if (document.querySelector('#drawer-products-panel:hover, #catalog-studio')) return;
-      const marker = e.clipboardData?.getData('text/plain') || '';
-      if (boardClipRef.current && marker === `aips-clip:${boardClipRef.current.id}`) {
-        e.preventDefault();
-        pasteBoardClip();
-        return;
-      }
-      const items = Array.from(e.clipboardData?.items || []);
-      const stamp = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-      const files = items
-        .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
-        .map((it, i) => {
-          const f = it.getAsFile();
-          if (!f) return null;
-          const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
-          return new File([f], `Вставка ${stamp}${i ? ` ${i + 1}` : ''}.${ext}`, { type: f.type });
-        })
-        .filter((f): f is File => f !== null);
-      if (files.length === 0) return;
-      e.preventDefault();
-      handleAddImagesRef.current(files);
-    };
-    window.addEventListener('paste', onPaste);
-    return () => window.removeEventListener('paste', onPaste);
-  }, [pasteBoardClip]);
-
-  const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      await handleAddImages(files);
-    }
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const selectedCardsList = (activeProject.cards || []).filter((c) =>
-    selectedCardIds.has(c.id)
-  );
+  // Keyboard: ⌘G, ⌘A, undo / redo, copy / cut / paste of board photos, the file input.
+  const {
+    handleFileInputChange,
+    selectedCardsList,
+    selectedGroup,
+  } = useBoardShortcuts({
+    activeProject,
+    activeProjectId,
+    fileInputRef,
+    handleAddImages,
+    handleDeleteSelection,
+    handleGroupSelected,
+    handleSaveProducts,
+    handleUngroup,
+    handleUpdateCards,
+    latestProductsRef,
+    latestProjectsRef,
+    projects,
+    saveProjectsToStorage,
+    selectedCardIds,
+    selectedNoteIds,
+    setProductsList,
+    setProjects,
+    setSelectedCardIds,
+    setSelectedNoteIds,
+    studioView,
+    undo,
+  });
 
   return (
     <div
