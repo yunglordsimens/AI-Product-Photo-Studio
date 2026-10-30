@@ -73,7 +73,24 @@ export async function idbGet<T>(key: string): Promise<T | null> {
   }
 }
 
-export async function idbSet<T>(key: string, value: T): Promise<boolean> {
+// The cloud sync listens to every write; it can also freeze writes for a moment while it reloads the studio
+type WriteListener = (key: string, value: unknown) => void;
+let writeListener: WriteListener | null = null;
+let writesFrozen = false;
+export function setIdbWriteListener(fn: WriteListener | null): void {
+  writeListener = fn;
+}
+/** After this only `force` writes go through (used right before the page reloads with fresh cloud data) */
+export function freezeIdbWrites(): void {
+  writesFrozen = true;
+}
+
+export async function idbSet<T>(
+  key: string,
+  value: T,
+  opts?: { silent?: boolean; force?: boolean }
+): Promise<boolean> {
+  if (writesFrozen && !opts?.force) return true;
   try {
     const db = await openCanvasDB();
     return new Promise((resolve, reject) => {
@@ -83,6 +100,13 @@ export async function idbSet<T>(key: string, value: T): Promise<boolean> {
 
       request.onsuccess = () => {
         resolve(true);
+        if (!opts?.silent && writeListener) {
+          try {
+            writeListener(key, value);
+          } catch {
+            /* the listener must never break saving */
+          }
+        }
       };
       request.onerror = () => {
         reject(request.error);

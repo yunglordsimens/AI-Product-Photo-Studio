@@ -1,4 +1,5 @@
 import { Info } from './Info';
+import { CloudStatusLine, useCloud } from './CloudUI';
 import React, { useState } from 'react';
 import { Project, StorageInfo } from '../types';
 
@@ -6,6 +7,8 @@ interface SidebarProps {
   projects: Project[];
   activeProjectId: string;
   storageInfo: StorageInfo;
+  /** Opens the settings window with the cloud section */
+  onOpenCloud?: () => void;
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
   /** Desktop: the column folds to zero width */
@@ -24,6 +27,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   projects,
   activeProjectId,
   storageInfo,
+  onOpenCloud,
   isMobileOpen = false,
   onCloseMobile,
   isCollapsed = false,
@@ -35,6 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteProject,
   onRenameProject,
 }) => {
+  const cloud = useCloud();
   const [resizing, setResizing] = useState(false);
   const startResize = (e: React.PointerEvent) => {
     if (!onResize) return;
@@ -186,16 +191,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <div
           className="px-2 pb-2 text-[11px] leading-snug text-[var(--grey)]"
-          title="Все проекты, фото и мастер-промпты лежат в памяти этого браузера (IndexedDB)"
+          title={cloud.enabled ? 'Копия в браузере, основное хранилище — облако студии' : 'Все проекты, фото и мастер-промпты лежат в памяти этого браузера (IndexedDB)'}
         >
           <div className="flex justify-between text-[var(--fg)]">
             <span>В этом браузере</span>
             <span className="tabular-nums">{(storageInfo.usedBytes / (1024 * 1024)).toFixed(1)} MB</span>
           </div>
-          <p className="mt-0.5">
-            Хранится только по адресу {typeof window !== 'undefined' ? window.location.hostname : ''}, не в облаке. Для копии —
-            «Скачать».
-          </p>
+          <div className="mt-0.5">
+            <CloudStatusLine onOpen={() => onOpenCloud?.()} />
+          </div>
+          {!cloud.enabled && (
+            <p className="mt-0.5">
+              Сейчас хранится только по адресу {typeof window !== 'undefined' ? window.location.hostname : ''}.
+            </p>
+          )}
           {onCloseMobile && (
             <button onClick={onCloseMobile} className="ofst-cell md:hidden mt-1 -mx-2">
               Закрыть

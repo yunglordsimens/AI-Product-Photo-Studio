@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FloatingWindow } from './FloatingWindow';
+import { CloudSettings } from './CloudUI';
 import {
   DEFAULT_IMAGE_MODEL,
   IMAGE_MODEL_OPTIONS,
@@ -15,9 +16,10 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSaved?: (key: string) => void;
+  onShowConflicts?: () => void;
 }
 
-export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, onSaved, onShowConflicts }: SettingsModalProps) {
   const [password, setPassword] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState(DEFAULT_IMAGE_MODEL);
@@ -51,7 +53,7 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
   const inputClass = 'w-full h-8 px-2 text-[13px]';
 
   return (
-    <FloatingWindow id="settings" title="Доступ к генерации" width={448} onClose={onClose} zIndex={70} className="select-none">
+    <FloatingWindow id="settings" title="Настройки" width={448} onClose={onClose} zIndex={70} className="select-none">
 
         <form onSubmit={handleSave} className="space-y-3 pt-2">
           <div>
@@ -139,6 +141,7 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
             </button>
           </div>
         </form>
+        <CloudSettings onShowConflicts={() => onShowConflicts?.()} />
     </FloatingWindow>
   );
 }

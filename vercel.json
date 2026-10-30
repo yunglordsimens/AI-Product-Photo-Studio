@@ -2,6 +2,9 @@
   "functions": {
     "api/gemini.ts": {
       "maxDuration": 60
+    },
+    "api/cloud.ts": {
+      "maxDuration": 30
     }
   }
 }

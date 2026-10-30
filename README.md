@@ -16,5 +16,11 @@ Requests go through `/api/gemini` (Vercel function). Set in Vercel → Settings 
 - `GEMINI_API_KEY` – Google AI Studio key (server only)
 - `STUDIO_PASSWORD` – typed once in the app's settings
 
+## Cloud
+`/api/cloud` keeps every device in step: documents (one per project, positions, catalog, prompts) in Neon Postgres, photos in Cloudflare R2 stored once by content hash. The browser stays the working copy and works offline; changes go up a few seconds later. Writes carry the cloud version they are based on, so nothing is overwritten silently: if two devices changed the same thing, the studio asks which version to keep.
+Turn it on per device: Settings → Облако → «Перенести в облако и подключить». Needs, besides `STUDIO_PASSWORD`:
+- `DATABASE_URL` – added by the Neon integration in Vercel (`POSTGRES_URL` also works)
+- `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`
+
 For local `npm run dev` there is no `/api`; paste a personal key in settings instead (stored only in that browser).
 Never use `VITE_`-prefixed variables for keys: they are embedded in the public bundle.

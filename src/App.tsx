@@ -52,6 +52,7 @@ import { ShortcutsModal } from './components/ShortcutsModal';
 import { ExportModal } from './components/ExportModal';
 import { ImagePreviewModal } from './components/ImagePreviewModal';
 import { SettingsModal } from './components/SettingsModal';
+import { CloudBanner, CloudConflictsWindow } from './components/CloudUI';
 import { GenerationPanel, ConsideredNoteInfo } from './components/GenerationPanel';
 import { MasterPromptsModal } from './components/MasterPromptsModal';
 import { StyleAnalysisModal } from './components/StyleAnalysisModal';
@@ -131,6 +132,7 @@ export default function App() {
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isCloudConflictsOpen, setIsCloudConflictsOpen] = useState(false);
   const [isGenerationOpen, setIsGenerationOpen] = useState(false);
   // Tabs: the board, the catalog conveyor, video
   const [studioView, setStudioViewState] = useState<StudioView>(() => {
@@ -2727,6 +2729,7 @@ export default function App() {
           </a>
         </div>
       )}
+      <CloudBanner onResolve={() => setIsCloudConflictsOpen(true)} />
       {folderImportStatus && (
         <div className="bg-[var(--fg)] text-white text-[12px] px-2 py-1 z-40">{folderImportStatus}</div>
       )}
@@ -2809,6 +2812,7 @@ export default function App() {
           projects={projects}
           activeProjectId={activeProjectId}
           storageInfo={storageInfo}
+          onOpenCloud={() => setIsSettingsOpen(true)}
           isMobileOpen={isMobileSidebarOpen}
           isCollapsed={isSidebarCollapsed}
           onCollapse={toggleSidebar}
@@ -3109,7 +3113,9 @@ export default function App() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onSaved={() => setGenerationError(null)}
+        onShowConflicts={() => setIsCloudConflictsOpen(true)}
       />
+      {isCloudConflictsOpen && <CloudConflictsWindow onClose={() => setIsCloudConflictsOpen(false)} />}
 
       <ShortcutsModal
         isOpen={isShortcutsOpen}

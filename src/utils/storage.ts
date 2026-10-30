@@ -370,6 +370,10 @@ function scheduleProjectsWrite(): void {
   if (projectsWriteTimer !== null) window.clearTimeout(projectsWriteTimer);
   projectsWriteTimer = window.setTimeout(flushProjectsWrite, 350);
 }
+/** Writes now only if a change is still waiting in the timer */
+export function flushPendingProjectsWrite(): void {
+  if (projectsWriteTimer !== null) flushProjectsWrite();
+}
 function flushProjectsWrite(): void {
   if (projectsWriteTimer !== null) {
     window.clearTimeout(projectsWriteTimer);
