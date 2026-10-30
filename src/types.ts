@@ -127,6 +127,41 @@ export interface BoardMatrix {
   lineProductIds?: (string | null)[];
 }
 
+export type PackagingNicotineStatus = 'unknown' | 'none' | 'contains';
+
+export interface PackagingArtworkText {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  fontSize: number;
+  fill: string;
+}
+
+/** A small editable intake record for the first Packaging Studio prototype. */
+export interface PackagingBrief {
+  market: string;
+  productType: string;
+  nicotine: PackagingNicotineStatus;
+  nicotineDetails?: string;
+  brandName: string;
+  productName: string;
+  packagingFormat: string;
+  desiredLogo: string;
+  suppliedCopy: string;
+  printerRequirements: string;
+  dielineName: string;
+  dielineSvg?: string;
+  dielineWidthMm?: number;
+  dielineHeightMm?: number;
+  dielineViewBox?: string;
+  dielineText?: string[];
+  artworkText?: PackagingArtworkText[];
+  aiSummary?: string;
+  clientQuestions?: string[];
+  updatedAt: number;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -138,6 +173,8 @@ export interface Project {
   siteMockup?: SiteMockup;
   /** Axis grids on the board: one line per product, one cross line per angle / variant */
   matrices?: BoardMatrix[];
+  /** Packaging intake and dieline data live with this project and follow its cloud sync. */
+  packaging?: PackagingBrief;
   createdAt: number;
   updatedAt: number;
   pan: { x: number; y: number };

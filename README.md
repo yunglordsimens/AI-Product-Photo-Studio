@@ -11,6 +11,11 @@ Private tool for OFST: a moodboard canvas plus **Catalog mode**, which re-shoots
 
 Always check by eye: food must stay the same dish and portion; label text on packaging can come back garbled; event photos are enhanced only.
 
+## Packaging prototype
+The **Упаковка** workspace is an early, separate view inside each studio project. It keeps an editable intake brief beside the existing Creative Workspace, parses an uploaded SVG dieline (up to 2 MB), shows a sanitized 2D preview and extracted text, builds client questions from missing fields, and marks unresolved product, legal and print checks. The optional Gemini summary is a draft only; legal requirements are not yet backed by a verified rules database and are never marked compliant.
+
+Use the existing board for reference images, then select up to three in the Packaging view for analysis. Packaging data is saved with the project and follows the existing project storage/cloud sync. PDF parsing, dieline editing, verified compliance rules, and print-ready SVG/PDF export remain follow-up work.
+
 ## Access
 Requests go through `/api/gemini` (Vercel function). Set in Vercel → Settings → Environment Variables:
 - `GEMINI_API_KEY` – Google AI Studio key (server only)
