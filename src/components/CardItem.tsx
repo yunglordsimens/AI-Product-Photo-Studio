@@ -233,6 +233,7 @@ export const CardItem: React.FC<CardItemProps> = memo(
           <span className="truncate text-[var(--grey)] group-hover:text-[var(--fg)]" title={card.name}>
             {card.name || 'product.png'}
           </span>
+          {isGenerating && <span className="shrink-0 bg-[var(--marker)] px-0.5 text-[var(--fg)]">генерация…</span>}
           {meta && (
             <button
               type="button"

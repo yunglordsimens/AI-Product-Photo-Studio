@@ -1,8 +1,9 @@
 import { PromptExampleView } from './PromptExampleView';
+import { Info } from './Info';
 import React, { useState, useRef, useEffect } from 'react';
 import { Card, MasterPrompt, Note, ProductItem } from '../types';
 import { groupPrompts } from '../utils/promptCategories';
-import { REFERENCE_ROLES } from '../utils/referenceRoles';
+import { REFERENCE_ROLES, splitSelection } from '../utils/referenceRoles';
 
 export interface ConsideredNoteInfo {
   id: string;
@@ -16,8 +17,6 @@ export interface GenerationOptions {
   isProductReplacement?: boolean;
   selectedProduct?: ProductItem;
   masterPromptName?: string;
-  /** What the selected photos are: the product to keep, or an example of the style to copy */
-  photoRole?: 'product' | 'style';
 }
 
 interface GenerationPanelProps {
@@ -27,12 +26,8 @@ interface GenerationPanelProps {
   consideredNotes: ConsideredNoteInfo[];
   onDeselectCard?: (cardId: string) => void;
   onGenerate: (prompt: string, options?: GenerationOptions) => Promise<void>;
-  onGenerateBatch?: (
-    prompt: string,
-    selectedProductIds: string[],
-    onProgress: (current: number, total: number, currentProductName: string) => void
-  ) => Promise<number>;
-  isGenerating: boolean;
+  /** Generations queued or running right now */
+  activeGenerations: number;
   errorMessage: string | null;
   onClearError: () => void;
   onOpenSettings: () => void;
@@ -52,8 +47,7 @@ export function GenerationPanel({
   consideredNotes,
   onDeselectCard,
   onGenerate,
-  onGenerateBatch,
-  isGenerating,
+  activeGenerations,
   errorMessage,
   onClearError,
   onOpenSettings,
@@ -64,19 +58,10 @@ export function GenerationPanel({
   products = [],
   onOpenProducts,
 }: GenerationPanelProps) {
-  const [activeTab, setActiveTab] = useState<'single' | 'batch'>('single');
   const [prompt, setPrompt] = useState('');
   const [selectedMasterPromptId, setSelectedMasterPromptId] = useState('');
-  const [photoRole, setPhotoRole] = useState<'product' | 'style'>('product');
   const [isProductReplacementMode, setIsProductReplacementMode] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState<string>('');
-  const [selectedBatchProductIds, setSelectedBatchProductIds] = useState<Set<string>>(new Set());
-  const [batchProgress, setBatchProgress] = useState<{
-    current: number;
-    total: number;
-    productName: string;
-  } | null>(null);
-
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const isDraggingRef = useRef(false);
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number }>({
@@ -197,41 +182,11 @@ export function GenerationPanel({
     window.addEventListener('mouseup', handleMouseUp);
   };
 
-  // Batch Selection Helpers
-  const handleToggleBatchProduct = (productId: string) => {
-    setSelectedBatchProductIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(productId)) {
-        next.delete(productId);
-      } else {
-        if (next.size >= 10) {
-          window.alert('Максимум 10 продуктов за раз');
-          return prev;
-        }
-        next.add(productId);
-      }
-      return next;
-    });
-  };
-
-  const handleSelectAllBatch = () => {
-    const ids = products.slice(0, 10).map((p) => p.id);
-    if (products.length > 10) {
-      window.alert('Выбраны первые 10 продуктов (максимум за один пакет)');
-    }
-    setSelectedBatchProductIds(new Set(ids));
-  };
-
-  const handleDeselectAllBatch = () => {
-    setSelectedBatchProductIds(new Set());
-  };
-
   if (!isOpen) return null;
 
   // Single Generation Submit
   const handleSingleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isGenerating) return;
 
     if (isProductReplacementMode) {
       if (products.length === 0) {
@@ -252,54 +207,7 @@ export function GenerationPanel({
       onGenerate(prompt, {
         isProductReplacement: false,
         masterPromptName: usedMasterPromptName(),
-        photoRole,
       });
-    }
-  };
-
-  // Batch Generation Submit
-  const handleBatchSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isGenerating) return;
-
-    if (selectedBatchProductIds.size < 2) {
-      window.alert('Выберите минимум 2 продукта');
-      return;
-    }
-
-    if (selectedBatchProductIds.size > 10) {
-      window.alert('Максимум 10 продуктов за раз');
-      return;
-    }
-
-    // Validate that all selected products have photoDataUrl
-    for (const prodId of selectedBatchProductIds) {
-      const prod = products.find((p) => p.id === prodId);
-      if (!prod || !prod.photoDataUrl) {
-        window.alert(`У продукта "${prod?.name || 'Без названия'}" нет фото. Добавьте фото в библиотеке.`);
-        return;
-      }
-    }
-
-    if (!onGenerateBatch) {
-      window.alert('Функция пакетной генерации недоступна');
-      return;
-    }
-
-    try {
-      setBatchProgress({ current: 1, total: selectedBatchProductIds.size, productName: '' });
-      const generatedCount = await onGenerateBatch(
-        prompt,
-        Array.from(selectedBatchProductIds),
-        (current, total, currentProductName) => {
-          setBatchProgress({ current, total, productName: currentProductName });
-        }
-      );
-      setBatchProgress(null);
-      window.alert(`Готово: сгенерировано ${generatedCount} изображений`);
-    } catch (err) {
-      setBatchProgress(null);
-      // error is handled by App.tsx through setGenerationError
     }
   };
 
@@ -310,15 +218,26 @@ export function GenerationPanel({
     'Чистый минималистичный белый фон с мягкими тенями',
   ];
 
-  // Small shared pieces, so both tabs look the same
+  // What the click will make: one shot per product, references go to every shot
+  const { products: selProducts, refs: selRefs } = splitSelection(selectedCards);
+  const refIds = new Set(selRefs.map((c) => c.id));
+  const shots = isProductReplacementMode ? 1 : selProducts.length || 1;
+  const plural = (n: number, one: string, few: string, many: string) =>
+    n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many;
+
   const thumbs = (size: string) =>
     selectedCards.length === 0 ? (
-      <p className="text-[12px] text-[var(--grey)] py-1">Выдели на доске 1–5 фото (Shift+клик или рамкой)</p>
+      <p className="text-[12px] text-[var(--grey)] py-1">Выдели на доске фото (Shift+клик или рамкой)</p>
     ) : (
       <div className="flex gap-0.5 overflow-x-auto custom-scrollbar">
-        {selectedCards.slice(0, 5).map((card, idx) => (
+        {selectedCards.slice(0, 8).map((card, idx) => (
           <div key={card.id} className={`relative group shrink-0 ${size} bg-[var(--soft)]`}>
-            <img src={card.src} alt={card.name || `Ref ${idx + 1}`} className="w-full h-full object-cover" />
+            <img src={card.src} alt={card.name || `Фото ${idx + 1}`} className="w-full h-full object-cover" />
+            {!isProductReplacementMode && refIds.has(card.id) && (
+              <span className="absolute left-0 bottom-0 bg-white px-1 text-[10px] leading-4" title="Референс: с него берётся то, что отмечено в «берём:»">
+                реф
+              </span>
+            )}
             {onDeselectCard && (
               <button
                 type="button"
@@ -331,9 +250,9 @@ export function GenerationPanel({
             )}
           </div>
         ))}
-        {selectedCards.length > 5 && (
+        {selectedCards.length > 8 && (
           <div className={`shrink-0 ${size} bg-[var(--soft)] flex items-center justify-center text-[12px]`}>
-            +{selectedCards.length - 5}
+            +{selectedCards.length - 8}
           </div>
         )}
       </div>
@@ -425,24 +344,6 @@ export function GenerationPanel({
               </button>
             </span>
           </div>
-          <div className="flex pt-0.5">
-            <button
-              type="button"
-              id="tab-single-generation"
-              onClick={() => setActiveTab('single')}
-              className={`ofst-cell ${activeTab === 'single' ? 'is-on' : ''}`}
-            >
-              Одно фото
-            </button>
-            <button
-              type="button"
-              id="tab-batch-generation"
-              onClick={() => setActiveTab('batch')}
-              className={`ofst-cell ${activeTab === 'batch' ? 'is-on' : ''}`}
-            >
-              Пачкой{selectedBatchProductIds.size > 0 ? ` (${selectedBatchProductIds.size})` : ''}
-            </button>
-          </div>
         </div>
 
         {/* Error: yellow marker line, no box */}
@@ -462,49 +363,24 @@ export function GenerationPanel({
           </div>
         )}
 
-        {/* Batch progress: a line that fills */}
-        {isGenerating && batchProgress && (
-          <div className="mx-2 mt-2">
-            <div className="ofst-run">
-              <span>
-                Генерация {batchProgress.current} из {batchProgress.total}
-                {batchProgress.productName ? ` · ${batchProgress.productName}` : ''}
-              </span>
-              <span>{Math.round((batchProgress.current / batchProgress.total) * 100)}%</span>
-            </div>
-            <div className="h-1 bg-[var(--soft)]">
-              <div className="h-full bg-[var(--fg)] transition-all duration-300" style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }} />
-            </div>
-          </div>
-        )}
-
-        {/* TAB 1: one photo */}
-        {activeTab === 'single' && (
-          <form onSubmit={handleSingleSubmit} className="p-2 space-y-3">
+        <form onSubmit={handleSingleSubmit} className="p-2 space-y-3">
             <div>
               <div className="ofst-run mb-1">
-                <span>Выделенные фото {selectedCards.length}/5</span>
+                <span className="flex items-center gap-1">
+                  Выделенные фото {selectedCards.length}
+                  <Info>
+                    Каждое выделенное фото — товар, из него получается свой кадр. Фото с ролью «берём:» (фон, свет, ракурс…) —
+                    референс: сам не генерируется, а идёт примером в каждый кадр. Роль ставится на фото на доске. Можно выделить
+                    другие фото и нажать ещё раз, не дожидаясь: всё делается параллельно.
+                  </Info>
+                </span>
                 <span className="text-[var(--grey)]">{consideredNotes.length > 0 ? `+ ${consideredNotes.length} заметки` : ''}</span>
               </div>
-              {!isProductReplacementMode && (
-                <div className="flex mb-1">
-                  {(['product', 'style'] as const).map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setPhotoRole(r)}
-                      className={`ofst-cell ${photoRole === r ? 'is-on' : ''}`}
-                    >
-                      {r === 'product' ? 'это продукт' : 'это пример стиля'}
-                    </button>
-                  ))}
-                </div>
-              )}
               {thumbs('w-16 h-16')}
               {selectedCards.some((c) => c.takes?.length) && (
                 <p className="mt-1 text-[12px] leading-snug">
                   {selectedCards
-                    .slice(0, 5)
+                    .slice(0, 8)
                     .map((c, i) =>
                       c.takes?.length
                         ? `${i + 1}: ${c.takes.map((t) => REFERENCE_ROLES.find((r) => r.id === t)?.label).filter(Boolean).join(', ')}`
@@ -516,10 +392,12 @@ export function GenerationPanel({
               )}
               <p className="mt-1 text-[12px] text-[var(--grey)] leading-snug">
                 {isProductReplacementMode
-                  ? 'С них берутся сцена, свет и фон; продукт — из библиотеки.'
-                  : photoRole === 'product'
-                  ? 'Продукт остаётся как есть, сцену, свет и фон задаёт промпт или мастер-промпт.'
-                  : 'С них берутся свет, фон, цвет и ракурс; что изобразить — пишешь в промпте.'}
+                  ? 'С выделенных фото берутся сцена, свет и фон; продукт — из библиотеки. Получится один кадр.'
+                  : selProducts.length > 0
+                    ? `${selProducts.length === 1 ? 'Товар остаётся' : `${selProducts.length} ${plural(selProducts.length, 'товар', 'товара', 'товаров')}, у каждого свой кадр. Товары остаются`} как есть; сцену задают промпт${selRefs.length ? ` и ${selRefs.length === 1 ? 'референс' : `${selRefs.length} ${plural(selRefs.length, 'референс', 'референса', 'референсов')}`}` : ''}.`
+                    : selRefs.length > 0
+                      ? 'Выделены только референсы: получится один кадр в их стиле, что изобразить — пишешь в промпте.'
+                      : 'Без фото кадр делается только по промпту.'}
               </p>
             </div>
 
@@ -613,99 +491,15 @@ export function GenerationPanel({
             </div>
 
             <div className="sticky bottom-0 bg-white pt-1 pb-2 flex items-center justify-between">
-              <span className="hidden sm:inline text-[11px] text-[var(--grey)]">G — открыть / закрыть</span>
-              <button type="submit" id="btn-trigger-generate" disabled={isGenerating} className="ofst-cell ofst-cell--primary !h-9 !px-4">
-                {isGenerating ? 'Генерация…' : 'Сгенерировать'}
+              <span className="text-[12px] text-[var(--grey)] tabular-nums">
+                {activeGenerations > 0 ? `идёт: ${activeGenerations}` : ''}
+              </span>
+              <button type="submit" id="btn-trigger-generate" className="ofst-cell ofst-cell--primary !h-9 !px-4">
+                {shots > 1 ? `Сгенерировать ${shots}` : 'Сгенерировать'}
               </button>
             </div>
           </form>
-        )}
 
-        {/* TAB 2: batch over products */}
-        {activeTab === 'batch' && (
-          <form onSubmit={handleBatchSubmit} className="p-2 space-y-3">
-            <div>
-              <div className="ofst-run mb-1">
-                <span>
-                  Продукты {selectedBatchProductIds.size} из {products.length}
-                  {selectedBatchProductIds.size < 2 ? ' · нужно минимум 2' : ''}
-                </span>
-                <span className="flex gap-3">
-                  <button type="button" onClick={handleSelectAllBatch} className="hover:text-[var(--fg)] cursor-pointer">
-                    все
-                  </button>
-                  <button type="button" onClick={handleDeselectAllBatch} className="hover:text-[var(--fg)] cursor-pointer">
-                    снять
-                  </button>
-                </span>
-              </div>
-              {products.length === 0 ? (
-                <p className="text-[12px] text-[var(--grey)]">
-                  В библиотеке нет продуктов.{' '}
-                  {onOpenProducts && (
-                    <button type="button" onClick={onOpenProducts} className="underline text-[var(--fg)] cursor-pointer">
-                      Открыть продукты
-                    </button>
-                  )}
-                </p>
-              ) : (
-                <div className="max-h-56 overflow-y-auto custom-scrollbar space-y-0.5">
-                  {products.map((prod) => {
-                    const isSelected = selectedBatchProductIds.has(prod.id);
-                    const hasPhoto = Boolean(prod.photoDataUrl);
-                    return (
-                      <label
-                        key={prod.id}
-                        className={`flex items-center gap-2 pr-2 cursor-pointer select-none text-[13px] ${
-                          isSelected ? 'bg-[var(--fg)] text-white' : 'bg-[var(--soft)] hover:bg-[var(--soft-2)]'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleToggleBatchProduct(prod.id)}
-                          className="sr-only"
-                        />
-                        <span className="w-9 h-9 shrink-0 bg-[var(--soft-2)]">
-                          {hasPhoto && <img src={prod.photoDataUrl} alt={prod.name} className="w-full h-full object-cover" />}
-                        </span>
-                        <span className="flex-1 min-w-0 truncate">{prod.name || 'Без названия'}</span>
-                        {!hasPhoto && <span className="shrink-0 text-[11px] opacity-70">нет фото</span>}
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <div className="ofst-run mb-1">
-                <span>Стиль с этих фото {selectedCards.length}/5</span>
-                <span>один стиль для всех</span>
-              </div>
-              {thumbs('w-12 h-12')}
-            </div>
-
-            {masterSelect('gen-batch-master-prompt', 'Мастер-промпт (общий)')}
-            {promptBox('gen-batch-prompt-input', 'Общий промпт', 'Окружение, свет, фон для всех выбранных продуктов…')}
-
-            <div className="sticky bottom-0 bg-white pt-1 pb-2 flex items-center justify-between">
-              <span className="hidden sm:inline text-[11px] text-[var(--grey)]">до 10 за раз</span>
-              <button
-                type="submit"
-                id="btn-trigger-batch-generate"
-                disabled={isGenerating || selectedBatchProductIds.size < 2 || products.length === 0}
-                className="ofst-cell ofst-cell--primary !h-9 !px-4"
-              >
-                {isGenerating
-                  ? batchProgress
-                    ? `Генерация ${batchProgress.current} из ${batchProgress.total}…`
-                    : 'Генерация…'
-                  : `Сгенерировать пачку${selectedBatchProductIds.size > 0 ? ` (${selectedBatchProductIds.size})` : ''}`}
-              </button>
-            </div>
-          </form>
-        )}
       </div>
     </>
   );

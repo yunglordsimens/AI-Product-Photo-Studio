@@ -33,7 +33,8 @@ interface CanvasProps {
   onChangeCardTakes?: (cardId: string, takes: string[]) => void;
   onEditCard?: (cardId: string, instruction: string, promptName?: string) => void;
   quickEditPrompts?: { id: string; name: string; prompt: string }[];
-  isGenerating?: boolean;
+  /** Photos a generation is being made from right now */
+  generatingCardIds?: Set<string>;
   onDeleteSelection?: (cardIds: string[], noteIds: string[]) => void;
   onImportFolder?: (kind: 'products' | 'board' | 'ask') => void;
   onAddNote: (note: Note) => void;
@@ -92,7 +93,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onChangeCardTakes,
   onEditCard,
   quickEditPrompts,
-  isGenerating,
+  generatingCardIds,
   onDeleteSelection,
   onImportFolder,
   onAddNote,
@@ -1732,7 +1733,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             editTakes={selectedCardIds.size === 1 && selectedCardIds.has(card.id)}
             onEdit={onEditCard}
             quickEdits={quickEditPrompts}
-            isGenerating={isGenerating}
+            isGenerating={generatingCardIds?.has(card.id) ?? false}
           />
         ))}
 

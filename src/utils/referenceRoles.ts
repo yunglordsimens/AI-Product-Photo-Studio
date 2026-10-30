@@ -14,6 +14,16 @@ export const REFERENCE_ROLES: { id: string; label: string; prompt: string }[] = 
 
 export const isProductPhoto = (ids: string[] | undefined) => Boolean(ids?.includes('product'));
 
+/**
+ * Selected photos → what to generate.
+ * A photo is a reference when it has a «берём:» role (фон, свет…) and is not marked «товар»;
+ * every other photo is a product and gets its own shot.
+ */
+export function splitSelection<T extends { takes?: string[] }>(cards: T[]): { products: T[]; refs: T[] } {
+  const isRef = (c: T) => !isProductPhoto(c.takes) && (c.takes?.length || 0) > 0;
+  return { products: cards.filter((c) => !isRef(c)), refs: cards.filter(isRef) };
+}
+
 export function rolesPrompt(ids: string[] | undefined): string {
   return (ids || [])
     .map((id) => REFERENCE_ROLES.find((r) => r.id === id)?.prompt)

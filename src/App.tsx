@@ -35,6 +35,7 @@ import {
 } from './utils/storage';
 import { compressAndLoadImage, compressDataUrl, createSampleCard } from './utils/imageUtils';
 import { getStoredApiKey, hasGenerationAccess, generateImageWithGemini, analyzeStyleWithGemini, getImageModel } from './utils/gemini';
+import { splitSelection } from './utils/referenceRoles';
 import { SOURCE_FIX_MARKER } from './utils/storage';
 import { isImageFile, normalizeImageFiles } from './utils/heic';
 import { FolderFile, groupByFolder, folderFilesFromInput, snapshotFolderFiles } from './utils/folderImport';
@@ -160,7 +161,9 @@ export default function App() {
       localStorage.setItem('aips_view', v);
     } catch {}
   }, []);
-  const [isGenerating, setIsGenerating] = useState(false);
+  // Generations in flight (queued + running) and the photos they are made from
+  const [activeGenerations, setActiveGenerations] = useState(0);
+  const [generatingCardIds, setGeneratingCardIds] = useState<Set<string>>(new Set());
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [previewCard, setPreviewCard] = useState<Card | null>(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -358,6 +361,8 @@ export default function App() {
 
   const saveProjectsToStorage = useCallback((updatedProjects: Project[]) => {
     undo.record({ kind: 'board', state: latestProjectsRef.current });
+    // Async work (parallel generations, cutting) reads this ref: keep it current before the next render
+    latestProjectsRef.current = updatedProjects;
     setProjects(updatedProjects);
     saveProjects(updatedProjects);
     // Asynchronously refresh accurate storage usage
@@ -1456,14 +1461,37 @@ export default function App() {
     }
   }, [activeProject]);
 
-  // Handle Gemini Image Generation
+  // ---- Gemini generation ----
+  // Every selected product gets its own shot; photos with a «берём:» role are references for all of them.
+  // Runs go side by side (3 at a time, the rest wait in line); the button never locks.
+  const genSlots = useRef<{ running: number; queue: (() => void)[] }>({ running: 0, queue: [] });
+  const acquireGenSlot = () =>
+    new Promise<void>((resolve) => {
+      const s = genSlots.current;
+      if (s.running < 3) {
+        s.running++;
+        resolve();
+      } else s.queue.push(() => {
+        s.running++;
+        resolve();
+      });
+    });
+  const releaseGenSlot = () => {
+    const s = genSlots.current;
+    s.running--;
+    s.queue.shift()?.();
+  };
+  const selectedCardIdsRef = useRef(selectedCardIds);
+  selectedCardIdsRef.current = selectedCardIds;
+  const activeProjectIdRef = useRef(activeProjectId);
+  activeProjectIdRef.current = activeProjectId;
+
   const handleTriggerGeminiGeneration = async (
     prompt: string,
     options?: {
       isProductReplacement?: boolean;
       selectedProduct?: ProductItem;
       masterPromptName?: string;
-      photoRole?: 'product' | 'style';
       /** Generate from these photos instead of the board selection (e.g. «править» on one photo) */
       sourceCards?: Card[];
       /** «попробовать на выделенном»: the result becomes this prompt's example */
@@ -1477,108 +1505,132 @@ export default function App() {
       return;
     }
 
-    const currentCards = activeProject.cards || [];
-    const selectedCards = options?.sourceCards || currentCards.filter((c) => selectedCardIds.has(c.id));
+    const projectId = activeProjectId;
+    const selectedCards = options?.sourceCards || (activeProject.cards || []).filter((c) => selectedCardIds.has(c.id));
     const noteTexts = options?.sourceCards ? [] : consideredNotes.map((n) => n.text);
 
-    setIsGenerating(true);
-    setGenerationError(null);
-
-    try {
-      const result = await generateImageWithGemini(
-        apiKey,
-        prompt,
-        selectedCards,
-        noteTexts,
-        {
-          isProductReplacement: options?.isProductReplacement,
-          productImageDataUrl: options?.selectedProduct?.photoDataUrl,
-          photoRole: options?.photoRole,
-        }
-      );
-
-      // Compress data URL before storing
-      const compressedDataUrl = await compressDataUrl(result.imageUrl, 1600, 1600, 0.9);
-
-      // Compute position for new card (+50px to the right and down relative to references)
-      let newX = 200;
-      let newY = 200;
-
-      if (selectedCards.length > 0) {
-        const maxRight = Math.max(...selectedCards.map((c) => c.x + c.width));
-        const minTop = Math.min(...selectedCards.map((c) => c.y));
-        newX = maxRight + 50;
-        newY = minTop + 50;
+    type Job = { sources: Card[]; anchor: Card[]; label?: string; photoRole?: 'product' | 'style' };
+    let jobs: Job[];
+    const single = options?.sourceCards || options?.isProductReplacement || options?.exampleForPromptId || prompt.includes(SOURCE_FIX_MARKER);
+    if (single) {
+      jobs = [{ sources: selectedCards, anchor: selectedCards, photoRole: options?.sourceCards ? 'product' : undefined }];
+    } else {
+      const { products, refs } = splitSelection(selectedCards);
+      if (products.length === 0) {
+        jobs = [{ sources: refs.slice(0, 5), anchor: refs, photoRole: refs.length ? 'style' : undefined }];
       } else {
-        const currentPan = activeProject.pan || { x: 80, y: 80 };
-        const currentZoom = activeProject.zoom || 1;
-        newX = (-currentPan.x + window.innerWidth / 2 - 120) / currentZoom;
-        newY = (-currentPan.y + window.innerHeight / 2 - 150) / currentZoom;
+        if (products.length > 10 && !window.confirm(`Сгенерировать ${products.length} кадров? Это ${products.length} запросов к Gemini.`)) return;
+        jobs = products.map((p) => ({
+          sources: [{ ...p, takes: Array.from(new Set(['product', ...(p.takes || [])])) }, ...refs.slice(0, 4)],
+          anchor: [p],
+          label: p.name,
+          photoRole: 'product',
+        }));
       }
-
-      const maxZ = currentCards.reduce((max, c) => Math.max(max, c.zIndex || 1), 1);
-      const cardWidth = 240;
-      const cardHeight = Math.round(cardWidth * (result.height / result.width)) || 300;
-
-      const generatedCard: Card = {
-        id: `card_gen_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-        x: Math.round(newX),
-        y: Math.round(newY),
-        width: cardWidth,
-        height: cardHeight,
-        src: compressedDataUrl,
-        name: `Gemini_${new Date().toLocaleTimeString().replace(/:/g, '-')}.png`,
-        aspectRatio: cardWidth / cardHeight,
-        zIndex: maxZ + 1,
-        meta: {
-          kind: prompt.includes(SOURCE_FIX_MARKER) ? 'fix' : options?.isProductReplacement ? 'product' : 'generate',
-          prompt,
-          masterPromptName: options?.masterPromptName,
-          productName: options?.isProductReplacement ? options?.selectedProduct?.name : undefined,
-          model: getImageModel(),
-          sourceIds: selectedCards.map((c) => c.id),
-          createdAt: Date.now(),
-        },
-      };
-
-      const merged = [...currentCards, generatedCard];
-      // "Made from" links: every selected source card → the new card
-      const autoConnections: Connection[] = selectedCards.slice(0, 5).map((c, i) => ({
-        id: `conn_auto_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`,
-        from: c.id,
-        to: generatedCard.id,
-        auto: true,
-      }));
-      saveProjectsToStorage(
-        projects.map((p) =>
-          p.id === activeProjectId
-            ? {
-                ...p,
-                cards: merged,
-                connections: [...(p.connections || []), ...autoConnections],
-                updatedAt: Date.now(),
-              }
-            : p
-        )
-      );
-      setSelectedCardIds(new Set([generatedCard.id]));
-      setSelectedNoteIds(new Set());
-      setGenerationError(null);
-      // The first result of a master prompt becomes its example (or this one, when asked for)
-      const target = options?.exampleForPromptId
-        ? masterPromptsRef.current.find((mp) => mp.id === options.exampleForPromptId)
-        : promptByName(masterPromptsRef.current, options?.masterPromptName);
-      if (target && (options?.exampleForPromptId || !target.example)) {
-        makeExample(selectedCards[0]?.src, compressedDataUrl, options?.exampleForPromptId ? 'manual' : 'auto').then((ex) =>
-          handleSaveMasterPrompts(withExample(masterPromptsRef.current, target.id, ex))
-        );
-      }
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      setGenerationError(errorMsg);
-    } finally {
-      setIsGenerating(false);
     }
+    setGenerationError(null);
+    const selectionAtStart = selectedCardIdsRef.current;
+
+    const runJob = async (job: Job) => {
+      const ids = job.anchor.map((c) => c.id);
+      setActiveGenerations((n) => n + 1);
+      setGeneratingCardIds((prev) => new Set([...prev, ...ids]));
+      try {
+        await acquireGenSlot();
+        let result;
+        try {
+          result = await generateImageWithGemini(apiKey, prompt, job.sources, noteTexts, {
+            isProductReplacement: options?.isProductReplacement,
+            productImageDataUrl: options?.selectedProduct?.photoDataUrl,
+            photoRole: job.photoRole,
+          });
+        } finally {
+          releaseGenSlot();
+        }
+        const compressedDataUrl = await compressDataUrl(result.imageUrl, 1600, 1600, 0.9);
+
+        // Insert into the newest state of the project it was started in (other runs may have finished meanwhile)
+        const latest = latestProjectsRef.current;
+        const proj = latest.find((p) => p.id === projectId);
+        if (!proj) return;
+        const cards = proj.cards || [];
+        let newX: number;
+        let newY: number;
+        if (job.anchor.length > 0) {
+          const first = job.anchor[0];
+          const siblings = cards.filter((c) => c.meta?.sourceIds?.[0] === first.id).length;
+          newX = Math.max(...job.anchor.map((c) => c.x + c.width)) + 50 + siblings * 30;
+          newY = Math.min(...job.anchor.map((c) => c.y)) + 50 + siblings * 30;
+        } else {
+          const pan = proj.pan || { x: 80, y: 80 };
+          const zoom = proj.zoom || 1;
+          newX = (-pan.x + window.innerWidth / 2 - 120) / zoom;
+          newY = (-pan.y + window.innerHeight / 2 - 150) / zoom;
+        }
+        const maxZ = cards.reduce((max, c) => Math.max(max, c.zIndex || 1), 1);
+        const cardWidth = 240;
+        const cardHeight = Math.round(cardWidth * (result.height / result.width)) || 300;
+        const generatedCard: Card = {
+          id: `card_gen_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+          x: Math.round(newX),
+          y: Math.round(newY),
+          width: cardWidth,
+          height: cardHeight,
+          src: compressedDataUrl,
+          name: job.label ? `${job.label} · AI` : `Gemini_${new Date().toLocaleTimeString().replace(/:/g, '-')}.png`,
+          aspectRatio: cardWidth / cardHeight,
+          zIndex: maxZ + 1,
+          meta: {
+            kind: prompt.includes(SOURCE_FIX_MARKER) ? 'fix' : options?.isProductReplacement ? 'product' : 'generate',
+            prompt,
+            masterPromptName: options?.masterPromptName,
+            productName: options?.isProductReplacement ? options?.selectedProduct?.name : undefined,
+            model: getImageModel(),
+            sourceIds: job.sources.map((c) => c.id),
+            createdAt: Date.now(),
+          },
+        };
+        // "Made from" links: every source → the new card
+        const autoConnections: Connection[] = job.sources.slice(0, 5).map((c, i) => ({
+          id: `conn_auto_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`,
+          from: c.id,
+          to: generatedCard.id,
+          auto: true,
+        }));
+        saveProjectsToStorage(
+          latest.map((p) =>
+            p.id === projectId
+              ? { ...p, cards: [...(p.cards || []), generatedCard], connections: [...(p.connections || []), ...autoConnections], updatedAt: Date.now() }
+              : p
+          )
+        );
+        // One result and nothing else selected meanwhile: select it, so the next edit can follow
+        if (jobs.length === 1 && selectedCardIdsRef.current === selectionAtStart && projectId === activeProjectIdRef.current) {
+          setSelectedCardIds(new Set([generatedCard.id]));
+          setSelectedNoteIds(new Set());
+        }
+        // The first result of a master prompt becomes its example (or this one, when asked for)
+        const target = options?.exampleForPromptId
+          ? masterPromptsRef.current.find((mp) => mp.id === options.exampleForPromptId)
+          : promptByName(masterPromptsRef.current, options?.masterPromptName);
+        if (target && (options?.exampleForPromptId || !target.example)) {
+          makeExample(job.sources[0]?.src, compressedDataUrl, options?.exampleForPromptId ? 'manual' : 'auto').then((ex) =>
+            handleSaveMasterPrompts(withExample(masterPromptsRef.current, target.id, ex))
+          );
+        }
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        setGenerationError(job.label && jobs.length > 1 ? `«${job.label}»: ${errorMsg}` : errorMsg);
+      } finally {
+        setActiveGenerations((n) => n - 1);
+        setGeneratingCardIds((prev) => {
+          const next = new Set(prev);
+          ids.forEach((id) => next.delete(id));
+          return next;
+        });
+      }
+    };
+    jobs.forEach((job) => void runJob(job));
   };
 
   /** A generated photo on the board → the example of the master prompt it was made with */
@@ -1595,150 +1647,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeProject.cards]
   );
-
-  // Handle Batch Generation for multiple products from the library
-  const handleTriggerBatchGeneration = async (
-    prompt: string,
-    selectedProductIds: string[],
-    onProgress: (current: number, total: number, currentProductName: string) => void
-  ): Promise<number> => {
-    const apiKey = getStoredApiKey();
-    if (!hasGenerationAccess()) {
-      setGenerationError('Укажите пароль студии или API-ключ в настройках');
-      setIsSettingsOpen(true);
-      throw new Error('API-ключ не задан');
-    }
-
-    const currentCards = [...(activeProject.cards || [])];
-    let runningCards = [...currentCards];
-    let runningConnections = [...(activeProject.connections || [])];
-    const selectedCards = currentCards.filter((c) => selectedCardIds.has(c.id));
-    const noteTexts = consideredNotes.map((n) => n.text);
-
-    setIsGenerating(true);
-    setGenerationError(null);
-
-    const selectedProducts = productsList.filter((p) => selectedProductIds.includes(p.id));
-    let generatedCount = 0;
-
-    try {
-      for (let i = 0; i < selectedProducts.length; i++) {
-        const product = selectedProducts[i];
-        onProgress(i + 1, selectedProducts.length, product.name);
-
-        const batchPrompt = `Сгенерируй новое фото продукта '${product.name}' в том же стиле, что и референсы. Сохрани форму, цвет и текстуру продукта. ${prompt || ''}`.trim();
-
-        const result = await generateImageWithGemini(
-          apiKey,
-          prompt,
-          selectedCards,
-          noteTexts,
-          {
-            productImageDataUrl: product.photoDataUrl,
-            customPromptOverride: batchPrompt,
-          }
-        );
-
-        // Compress image data URL for localStorage safety
-        const compressedDataUrl = await compressDataUrl(result.imageUrl, 1600, 1600, 0.9);
-
-        // Find if product has matching card on canvas (by ID or matching name)
-        const matchingCard = runningCards.find(
-          (c) =>
-            c.id === product.id ||
-            (c.name && product.name && c.name.toLowerCase().includes(product.name.toLowerCase()))
-        );
-
-        let newX = 200;
-        let newY = 200;
-
-        if (matchingCard) {
-          newX = matchingCard.x + 50;
-          newY = matchingCard.y + 50;
-        } else if (selectedCards.length > 0) {
-          const maxRight = Math.max(...selectedCards.map((c) => c.x + c.width));
-          const minTop = Math.min(...selectedCards.map((c) => c.y));
-          newX = maxRight + 50 + (i % 3) * 260;
-          newY = minTop + 50 + Math.floor(i / 3) * 320;
-        } else {
-          const currentPan = activeProject.pan || { x: 80, y: 80 };
-          const currentZoom = activeProject.zoom || 1;
-          const baseX = (-currentPan.x + window.innerWidth / 2 - 120) / currentZoom;
-          const baseY = (-currentPan.y + window.innerHeight / 2 - 150) / currentZoom;
-          newX = baseX + (i % 3) * 260;
-          newY = baseY + Math.floor(i / 3) * 320;
-        }
-
-        const maxZ = runningCards.reduce((max, c) => Math.max(max, c.zIndex || 1), 1);
-        const cardWidth = 240;
-        const cardHeight = Math.round(cardWidth * (result.height / result.width)) || 300;
-
-        const newCardId = `card_batch_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`;
-        const newCard: Card = {
-          id: newCardId,
-          x: Math.round(newX),
-          y: Math.round(newY),
-          width: cardWidth,
-          height: cardHeight,
-          src: compressedDataUrl,
-          name: `${product.name} (AI).png`,
-          aspectRatio: cardWidth / cardHeight,
-          zIndex: maxZ + 1 + i,
-          meta: {
-            kind: 'batch',
-            prompt: batchPrompt,
-            productName: product.name,
-            model: getImageModel(),
-            sourceIds: selectedCards.map((c) => c.id),
-            createdAt: Date.now(),
-          },
-        };
-
-        runningCards = [...runningCards, newCard];
-
-        // Link with matching product card if on canvas
-        if (matchingCard) {
-          const newConn: Connection = {
-            id: `conn_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-            from: matchingCard.id,
-            to: newCardId,
-            auto: true,
-          };
-          runningConnections = [...runningConnections, newConn];
-        }
-
-        generatedCount++;
-
-        // Incrementally save state so user sees images appearing live on the canvas
-        const updated = projects.map((p) => {
-          if (p.id === activeProject.id) {
-            return {
-              ...p,
-              cards: runningCards,
-              connections: runningConnections,
-              updatedAt: Date.now(),
-            };
-          }
-          return p;
-        });
-        saveProjectsToStorage(updated);
-      }
-
-      // Select newly created batch cards
-      const newBatchCardIds = runningCards.slice(-generatedCount).map((c) => c.id);
-      setSelectedCardIds(new Set(newBatchCardIds));
-      setSelectedNoteIds(new Set());
-      setGenerationError(null);
-
-      return generatedCount;
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      setGenerationError(errorMsg);
-      throw err;
-    } finally {
-      setIsGenerating(false);
-    }
-  };
 
   // Keyboard shortcut listener ('G' / 'g' / 'п' / 'П' for generation panel)
   useEffect(() => {
@@ -2342,6 +2250,14 @@ export default function App() {
       window.alert('Пожалуйста, выделите от 1 до 5 карточек-изображений на канвасе для анализа стиля.');
       return;
     }
+    const n = Math.min(5, selectedCards.length);
+    if (
+      !window.confirm(
+        `Описать стиль ${n} фото${selectedCards.length > 5 ? ' (первых пяти)' : ''}?\n\nМодель посмотрит на них и положит описание заметкой рядом. Это один запрос к Gemini.`
+      )
+    )
+      return;
+    const projectId = activeProject.id;
 
     const cardsToAnalyze = selectedCards.slice(0, 5);
     setIsStyleAnalysisOpen(true);
@@ -2367,14 +2283,19 @@ export default function App() {
         projectId: activeProject.id,
         zIndex: 20,
       };
-      handleUpdateNotes([...(activeProject.notes || []), styleNote]);
+      // Into the newest state: generations may have finished while the model was looking
+      saveProjectsToStorage(
+        latestProjectsRef.current.map((p) =>
+          p.id === projectId ? { ...p, notes: [...(p.notes || []), styleNote], updatedAt: Date.now() } : p
+        )
+      );
     } catch (err: any) {
       console.error('Style analysis error:', err);
       setStyleAnalysisTags(`Ошибка: ${err?.message || 'Не удалось проанализировать стиль'}`);
     } finally {
       setIsAnalyzingStyle(false);
     }
-  }, [activeProject, selectedCardIds, handleUpdateNotes]);
+  }, [activeProject, selectedCardIds, saveProjectsToStorage]);
 
   const handleSaveStyleAsMasterPrompt = useCallback(
     (tagsText: string) => {
@@ -2880,7 +2801,7 @@ export default function App() {
           onChangeCardTakes={handleChangeCardTakes}
           onEditCard={handleEditCard}
           quickEditPrompts={quickEditPrompts}
-          isGenerating={isGenerating}
+          generatingCardIds={generatingCardIds}
           onDropCardsOnPosition={isProductLibraryOpen ? handleDropCardsOnPosition : undefined}
           onImportFolder={(kind) => pickFolder(kind)}
           selectedCardIds={selectedCardIds}
@@ -2997,8 +2918,7 @@ export default function App() {
                     });
                   }}
                   onGenerate={handleTriggerGeminiGeneration}
-                  onGenerateBatch={handleTriggerBatchGeneration}
-                  isGenerating={isGenerating}
+                  activeGenerations={activeGenerations}
                   errorMessage={generationError}
                   onClearError={() => setGenerationError(null)}
                   onOpenSettings={() => setIsSettingsOpen(true)}
@@ -3095,7 +3015,6 @@ export default function App() {
           setIsMasterPromptsOpen(false);
         }}
         selectedCards={selectedCardsList}
-        isGenerating={isGenerating}
         onTryPrompt={(mp) => handleTriggerGeminiGeneration(mp.prompt, { masterPromptName: mp.name, exampleForPromptId: mp.id })}
       />
 
