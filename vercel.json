@@ -1,4 +1,7 @@
 {
+  "regions": [
+    "fra1"
+  ],
   "functions": {
     "api/gemini.ts": {
       "maxDuration": 60
