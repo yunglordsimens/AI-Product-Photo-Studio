@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import type { Card, PackagingArtworkText, PackagingBrief, PackagingNicotineStatus } from '../types';
+import type { Card, PackagingArtworkText, PackagingBrief, PackagingCompanyRole, PackagingCustomizationStatus, PackagingNicotineStatus } from '../types';
 import { callGemini, extractTextFromResponse, getCardBase64Data, TEXT_MODEL } from '../utils/gemini';
 
 interface PackagingStudioProps {
@@ -14,11 +14,24 @@ const emptyBrief = (): PackagingBrief => ({
   market: '',
   productType: '',
   nicotine: 'unknown',
+  clientCompany: '',
+  packagingCompany: '',
+  packagingCompanyRole: 'unknown',
+  packagingCompanyDetails: '',
+  printerCountry: '',
+  factoryScope: '',
+  deviceCustomizationStatus: 'unknown',
+  deviceCustomizationDetails: '',
   brandName: '',
   productName: '',
   packagingFormat: '',
   desiredLogo: '',
   suppliedCopy: '',
+  packagingMaterial: '',
+  printMethod: '',
+  colorPalette: '',
+  printColorSpec: '',
+  finishSpecification: '',
   printerRequirements: '',
   dielineName: '',
   updatedAt: Date.now(),
@@ -119,10 +132,23 @@ export const PackagingStudio: React.FC<PackagingStudioProps> = ({ projectName, b
     !brief.productType.trim() && 'Что именно находится в упаковке',
     brief.nicotine === 'unknown' && 'Содержит ли продукт никотин',
     brief.nicotine === 'contains' && !brief.nicotineDetails?.trim() && 'Концентрация и объём никотина',
+    !brief.clientCompany?.trim() && 'Кто заказчик проекта',
+    !brief.packagingCompany?.trim() && 'Компания, которую указывать на упаковке',
+    (!brief.packagingCompanyRole || brief.packagingCompanyRole === 'unknown') && 'Роль этой компании',
+    brief.packagingCompany && !brief.packagingCompanyDetails?.trim() && 'Подтверждённые данные компании для упаковки',
+    !brief.printerCountry?.trim() && 'Страна типографии',
+    !brief.factoryScope?.trim() && 'Что именно поставляет фабрика',
+    (!brief.deviceCustomizationStatus || brief.deviceCustomizationStatus === 'unknown') && 'Возможность кастомизации устройства',
+    brief.deviceCustomizationStatus === 'available' && !brief.deviceCustomizationDetails?.trim() && 'Какие варианты кастомизации устройства доступны',
     !brief.brandName.trim() && 'Название бренда',
     !brief.productName.trim() && 'Название продукта или SKU',
     !brief.suppliedCopy.trim() && 'Тексты и сведения от клиента',
     !brief.dielineName && 'Дайлайн упаковки',
+    !brief.packagingMaterial?.trim() && 'Материал упаковки',
+    !brief.printMethod?.trim() && 'Способ печати',
+    !brief.colorPalette?.trim() && 'Цветовое направление',
+    !brief.printColorSpec?.trim() && 'Цвета для печати (CMYK / Pantone)',
+    !brief.finishSpecification?.trim() && 'Финишная обработка',
     !brief.printerRequirements.trim() && 'Технические требования типографии',
   ].filter(Boolean) as string[], [brief]);
 
@@ -132,17 +158,30 @@ export const PackagingStudio: React.FC<PackagingStudioProps> = ({ projectName, b
       'Что именно находится в упаковке': 'Что именно упаковываем: одноразовое устройство, многоразовое устройство, жидкость или набор?',
       'Содержит ли продукт никотин': 'Содержит ли продукт никотин? Если да, укажите концентрацию и объём.',
       'Концентрация и объём никотина': 'Укажите концентрацию никотина и объём продукта, используя данные с подтверждённой спецификации.',
+      'Кто заказчик проекта': 'Как называется компания или человек, который заказывает разработку упаковки?',
+      'Компания, которую указывать на упаковке': 'Какая компания, если такая есть, должна быть указана на упаковке отдельно от бренда продукта?',
+      'Роль этой компании': 'Какова подтверждённая роль этой компании: владелец бренда, импортёр, дистрибьютор, продавец или другое?',
+      'Подтверждённые данные компании для упаковки': 'Пришлите точное утверждённое написание и реквизиты компании, которые нужно разместить на упаковке. Ничего не сокращайте и не додумывайте.',
+      'Страна типографии': 'В какой стране находится типография, которая печатает упаковку?',
+      'Что именно поставляет фабрика': 'В каком виде приходит заказ от фабрики: готовое устройство, устройство с коробкой, комплект или другой вариант?',
+      'Возможность кастомизации устройства': 'Какие изменения корпуса или самого устройства фабрика разрешает: гравировка, печать логотипа, цвет корпуса или ничего? Попросите подтвердить у фабрики.',
+      'Какие варианты кастомизации устройства доступны': 'Попросите фабрику перечислить доступные варианты нанесения и отделки корпуса, ограничения, расположение, минимальный тираж и образцы.',
       'Название бренда': 'Как называется бренд? Есть ли написание, которое нужно использовать точно?',
       'Название продукта или SKU': 'Как называется продукт или конкретный вкус/вариант? Есть ли SKU?',
       'Тексты и сведения от клиента': 'Какие утверждения о продукте, состав, контакты и инструкции клиент требует разместить?',
       'Дайлайн упаковки': 'Есть ли исходный векторный дайлайн от производителя или типографии?',
+      'Материал упаковки': 'Из какого материала и какой плотности или марки должна быть упаковка? Если пока неизвестно, кто это подтвердит?',
+      'Способ печати': 'Какой способ печати планирует типография: цифровой, офсетный или другой?',
+      'Цветовое направление': 'Какие цвета и визуальное направление нужны бренду? Есть ли утверждённые референсы или брендбук?',
+      'Цвета для печати (CMYK / Pantone)': 'Есть ли утверждённые значения CMYK или номера Pantone? Кто подтвердит цветопробы?',
+      'Финишная обработка': 'Нужны ли ламинация, лак, тиснение, фольга или другая отделка? Какие именно варианты подтвердила типография?',
       'Технические требования типографии': 'Кто печатает упаковку и какие есть требования к вылетам, цветам, материалам и экспорту?',
     };
     return gaps.map((gap) => byGap[gap]);
   }, [gaps]);
 
   const update = (patch: Partial<PackagingBrief>) => {
-    const materialFields = new Set(['market', 'productType', 'nicotine', 'nicotineDetails', 'brandName', 'productName', 'packagingFormat', 'desiredLogo', 'suppliedCopy', 'printerRequirements', 'dielineName', 'dielineSvg', 'dielineWidthMm', 'dielineHeightMm', 'dielineViewBox', 'dielineText']);
+    const materialFields = new Set(['market', 'productType', 'nicotine', 'nicotineDetails', 'clientCompany', 'packagingCompany', 'packagingCompanyRole', 'packagingCompanyDetails', 'printerCountry', 'factoryScope', 'deviceCustomizationStatus', 'deviceCustomizationDetails', 'brandName', 'productName', 'packagingFormat', 'desiredLogo', 'suppliedCopy', 'packagingMaterial', 'printMethod', 'colorPalette', 'printColorSpec', 'finishSpecification', 'printerRequirements', 'dielineName', 'dielineSvg', 'dielineWidthMm', 'dielineHeightMm', 'dielineViewBox', 'dielineText']);
     const changedMaterial = Object.keys(patch).some((key) => materialFields.has(key));
     onChange({
       ...brief,
@@ -186,7 +225,7 @@ export const PackagingStudio: React.FC<PackagingStudioProps> = ({ projectName, b
       }
       const current = [
         `Project: ${projectName}`,
-        `Known facts: ${JSON.stringify({ market: brief.market, productType: brief.productType, nicotine: brief.nicotine, nicotineDetails: brief.nicotineDetails, brandName: brief.brandName, productName: brief.productName, packagingFormat: brief.packagingFormat, suppliedCopy: brief.suppliedCopy })}`,
+        `Known facts: ${JSON.stringify({ market: brief.market, productType: brief.productType, nicotine: brief.nicotine, nicotineDetails: brief.nicotineDetails, clientCompany: brief.clientCompany, packagingCompany: brief.packagingCompany, packagingCompanyRole: brief.packagingCompanyRole, packagingCompanyDetails: brief.packagingCompanyDetails, printerCountry: brief.printerCountry, factoryScope: brief.factoryScope, deviceCustomizationStatus: brief.deviceCustomizationStatus, deviceCustomizationDetails: brief.deviceCustomizationDetails, brandName: brief.brandName, productName: brief.productName, packagingFormat: brief.packagingFormat, suppliedCopy: brief.suppliedCopy, packagingMaterial: brief.packagingMaterial, printMethod: brief.printMethod, colorPalette: brief.colorPalette, printColorSpec: brief.printColorSpec, finishSpecification: brief.finishSpecification, printerRequirements: brief.printerRequirements })}`,
         `Dieline filename: ${brief.dielineName || 'not provided'}`,
         `Dieline viewBox: ${brief.dielineViewBox || 'unknown'}`,
         `Text extracted from SVG: ${(brief.dielineText || []).join(' | ') || 'none'}`,
@@ -231,8 +270,10 @@ export const PackagingStudio: React.FC<PackagingStudioProps> = ({ projectName, b
   const constraintRows = [
     { title: 'Классификация продукта и рынок', detail: brief.market && brief.productType && brief.nicotine !== 'unknown' && (brief.nicotine !== 'contains' || brief.nicotineDetails?.trim()) ? 'Данные заполнены; применимые требования ещё не сверены с источниками.' : 'Нужны рынок, тип продукта и сведения о никотине.', status: brief.market && brief.productType && brief.nicotine !== 'unknown' && (brief.nicotine !== 'contains' || brief.nicotineDetails?.trim()) ? 'Нужна проверка' : 'Блокирует проверку' },
     { title: 'Юридические тексты и маркировка', detail: brief.suppliedCopy ? 'Текст предоставлен клиентом; соответствие не проверено.' : 'Нет утверждённых текстов клиента. Не размещать придуманные предупреждения как финальные.', status: brief.suppliedCopy ? 'Нужна проверка' : 'Нет данных' },
+    { title: 'Бренд и компании', detail: [brief.brandName && `Бренд продукта: ${brief.brandName}`, brief.clientCompany && `Заказчик: ${brief.clientCompany}`, brief.packagingCompany && `Компания на упаковке: ${brief.packagingCompany}`, brief.packagingCompanyRole && brief.packagingCompanyRole !== 'unknown' && `Роль: ${{ brand_owner: 'владелец бренда', importer: 'импортёр', distributor: 'дистрибьютор', seller: 'продавец', other: 'другая' }[brief.packagingCompanyRole]}`, brief.packagingCompanyDetails && `Данные компании: ${brief.packagingCompanyDetails}`].filter(Boolean).join(' · ') || 'Раздели бренд продукта, заказчика проекта и компанию, которую при необходимости укажут на упаковке.', status: brief.brandName && brief.clientCompany && brief.packagingCompany && brief.packagingCompanyRole && brief.packagingCompanyRole !== 'unknown' ? 'Нужно сверить' : 'Нужно уточнить' },
+    { title: 'Фабрика и кастомизация устройства', detail: [brief.printerCountry && `Типография: ${brief.printerCountry}`, brief.factoryScope && `Поставка: ${brief.factoryScope}`, brief.deviceCustomizationDetails && `Кастомизация устройства: ${brief.deviceCustomizationDetails}`, brief.deviceCustomizationStatus === 'available' && 'Возможность указана клиентом; подтвердить у фабрики', brief.deviceCustomizationStatus === 'unavailable' && 'Кастомизация устройства указана как недоступная'].filter(Boolean).join(' · ') || 'Не указаны страна типографии, состав поставки и варианты персонализации устройства.', status: brief.printerCountry && brief.factoryScope && brief.deviceCustomizationStatus && brief.deviceCustomizationStatus !== 'unknown' ? 'Нужно сверить с фабрикой' : 'Нужно уточнить' },
     { title: 'Геометрия и конструкция', detail: brief.dielineName ? `${brief.dielineName}${brief.dielineWidthMm && brief.dielineHeightMm ? ` · ${brief.dielineWidthMm} × ${brief.dielineHeightMm} мм` : ''}. Размеры требуют подтверждения у производителя.` : 'Нет исходного дайлайна.', status: brief.dielineName ? 'Импортирован · проверить' : 'Нет дайлайна' },
-    { title: 'Печать и производство', detail: brief.printerRequirements || 'Материал, вылеты, цветовой профиль и требования типографии не заданы.', status: brief.printerRequirements ? 'Данные заполнены' : 'Нужно уточнить' },
+    { title: 'Печать и производство', detail: [brief.packagingMaterial && `Материал: ${brief.packagingMaterial}`, brief.printMethod && `Печать: ${brief.printMethod}`, brief.colorPalette && `Цветовое направление: ${brief.colorPalette}`, brief.printColorSpec && `Цвета для печати: ${brief.printColorSpec}`, brief.finishSpecification && `Финиш: ${brief.finishSpecification}`, brief.printerRequirements && `Требования типографии: ${brief.printerRequirements}`].filter(Boolean).join(' · ') || 'Материал, способ печати, цвета, финиш и требования типографии не заданы.', status: brief.packagingMaterial && brief.printMethod && brief.colorPalette && brief.printColorSpec && brief.finishSpecification && brief.printerRequirements ? 'Данные заполнены · сверить' : 'Нужно уточнить' },
   ];
   const dielinePreview = brief.dielineSvg ? previewSvgData(brief.dielineSvg) : '';
   const geometry = useMemo(() => {
@@ -342,11 +383,31 @@ export const PackagingStudio: React.FC<PackagingStudioProps> = ({ projectName, b
                 <label><span className={labelClass}>Никотин</span><select className={fieldClass} value={brief.nicotine} onChange={(e) => update({ nicotine: e.target.value as PackagingNicotineStatus, nicotineDetails: e.target.value === 'contains' ? brief.nicotineDetails : '' })}><option value="unknown">Пока неизвестно</option><option value="none">Нет</option><option value="contains">Есть</option></select></label>
                 {brief.nicotine === 'contains' && <label><span className={labelClass}>Концентрация / объём</span><input className={fieldClass} placeholder="По спецификации продукта" value={brief.nicotineDetails || ''} onChange={(e) => update({ nicotineDetails: e.target.value })} /></label>}
                 <label><span className={labelClass}>Формат упаковки</span><input className={fieldClass} placeholder="Складная картонная коробка…" value={brief.packagingFormat} onChange={(e) => update({ packagingFormat: e.target.value })} /></label>
-                <label><span className={labelClass}>Бренд</span><input className={fieldClass} placeholder="Название или «ещё не придумано»" value={brief.brandName} onChange={(e) => update({ brandName: e.target.value })} /></label>
+                <label><span className={labelClass}>Бренд продукта</span><input className={fieldClass} placeholder="Например, HQD" value={brief.brandName} onChange={(e) => update({ brandName: e.target.value })} /></label>
+                <label><span className={labelClass}>Заказчик проекта</span><input className={fieldClass} placeholder="Компания или человек, заказавший упаковку" value={brief.clientCompany || ''} onChange={(e) => update({ clientCompany: e.target.value })} /></label>
+                <label><span className={labelClass}>Компания, которую указывать на упаковке</span><input className={fieldClass} placeholder="Может быть заказчиком, а может быть другой компанией" value={brief.packagingCompany || ''} onChange={(e) => update({ packagingCompany: e.target.value })} /></label>
+                <label><span className={labelClass}>Роль этой компании</span><select className={fieldClass} value={brief.packagingCompanyRole || 'unknown'} onChange={(e) => update({ packagingCompanyRole: e.target.value as PackagingCompanyRole })}><option value="unknown">Пока неизвестно</option><option value="brand_owner">Владелец бренда</option><option value="importer">Импортёр</option><option value="distributor">Дистрибьютор</option><option value="seller">Продавец</option><option value="other">Другая роль</option></select></label>
+                <label className="sm:col-span-2"><span className={labelClass}>Точные данные компании для упаковки</span><textarea className={`${fieldClass} min-h-16`} placeholder="Вставь точное написание и данные, если компания должна быть на упаковке. Не заполняй догадками." value={brief.packagingCompanyDetails || ''} onChange={(e) => update({ packagingCompanyDetails: e.target.value })} /></label>
                 <label><span className={labelClass}>Продукт / вкус / SKU</span><input className={fieldClass} placeholder="Название, вариант или код" value={brief.productName} onChange={(e) => update({ productName: e.target.value })} /></label>
                 <label className="sm:col-span-2"><span className={labelClass}>Идея логотипа / желаемое впечатление</span><textarea className={`${fieldClass} min-h-20`} placeholder="Например: лаконично, технически, без готового логотипа" value={brief.desiredLogo} onChange={(e) => update({ desiredLogo: e.target.value })} /></label>
                 <label className="sm:col-span-2"><span className={labelClass}>Тексты и факты от клиента</span><textarea className={`${fieldClass} min-h-24`} placeholder="Вставь только подтверждённые сведения. Отсутствующие тексты не генерируются как юридически готовые." value={brief.suppliedCopy} onChange={(e) => update({ suppliedCopy: e.target.value })} /></label>
-                <label className="sm:col-span-2"><span className={labelClass}>Требования типографии</span><textarea className={`${fieldClass} min-h-20`} placeholder="Материал, вылеты, профиль цвета, формат передачи…" value={brief.printerRequirements} onChange={(e) => update({ printerRequirements: e.target.value })} /></label>
+              </div>
+            </section>
+
+            <section className="bg-white p-4 md:p-5">
+              <div className="ofst-run"><span>Производство · отделка</span><span>Материал, цвет, финиш</span></div>
+              <p className="mt-2 text-[12px] text-[var(--grey)]">Отделяй коробку от корпуса устройства. Пожелания и подтверждённые данные записываются отдельно; материал и отделку сверяй с фабрикой и типографией.</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label><span className={labelClass}>Материал упаковки</span><input className={fieldClass} placeholder="Например, картон · марка / плотность уточняется" value={brief.packagingMaterial || ''} onChange={(e) => update({ packagingMaterial: e.target.value })} /></label>
+                <label><span className={labelClass}>Способ печати</span><input className={fieldClass} placeholder="Цифровая, офсетная… или пока неизвестно" value={brief.printMethod || ''} onChange={(e) => update({ printMethod: e.target.value })} /></label>
+                <label><span className={labelClass}>Цветовое направление</span><input className={fieldClass} placeholder="Пожелания, палитра или ссылка на брендбук" value={brief.colorPalette || ''} onChange={(e) => update({ colorPalette: e.target.value })} /></label>
+                <label><span className={labelClass}>Цвета для печати</span><input className={fieldClass} placeholder="CMYK / Pantone — если уже утверждены" value={brief.printColorSpec || ''} onChange={(e) => update({ printColorSpec: e.target.value })} /></label>
+                <label className="sm:col-span-2"><span className={labelClass}>Финишная обработка</span><textarea className={`${fieldClass} min-h-16`} placeholder="Матовая / глянцевая ламинация, лак, фольга, тиснение… только пожелания или подтверждённая отделка" value={brief.finishSpecification || ''} onChange={(e) => update({ finishSpecification: e.target.value })} /></label>
+                <label><span className={labelClass}>Страна типографии</span><input className={fieldClass} placeholder="Например, Китай" value={brief.printerCountry || ''} onChange={(e) => update({ printerCountry: e.target.value })} /></label>
+                <label><span className={labelClass}>Что поставляет фабрика</span><input className={fieldClass} placeholder="Например, готовое устройство и коробка" value={brief.factoryScope || ''} onChange={(e) => update({ factoryScope: e.target.value })} /></label>
+                <label><span className={labelClass}>Кастомизация устройства у фабрики</span><select className={fieldClass} value={brief.deviceCustomizationStatus || 'unknown'} onChange={(e) => update({ deviceCustomizationStatus: e.target.value as PackagingCustomizationStatus })}><option value="unknown">Пока неизвестно</option><option value="available">Фабрика подтвердила варианты</option><option value="unavailable">Недоступна</option></select></label>
+                {brief.deviceCustomizationStatus === 'available' && <label className="sm:col-span-2"><span className={labelClass}>Что можно сделать с корпусом устройства</span><textarea className={`${fieldClass} min-h-16`} placeholder="Например, гравировка или нанесение логотипа — точный способ подтвердить у фабрики" value={brief.deviceCustomizationDetails || ''} onChange={(e) => update({ deviceCustomizationDetails: e.target.value })} /></label>}
+                <label className="sm:col-span-2"><span className={labelClass}>Остальные требования типографии</span><textarea className={`${fieldClass} min-h-20`} placeholder="Вылеты, профиль цвета, формат передачи, особые ограничения…" value={brief.printerRequirements} onChange={(e) => update({ printerRequirements: e.target.value })} /></label>
               </div>
             </section>
 

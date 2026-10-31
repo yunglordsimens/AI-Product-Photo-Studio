@@ -128,6 +128,8 @@ export interface BoardMatrix {
 }
 
 export type PackagingNicotineStatus = 'unknown' | 'none' | 'contains';
+export type PackagingCompanyRole = 'unknown' | 'brand_owner' | 'importer' | 'distributor' | 'seller' | 'other';
+export type PackagingCustomizationStatus = 'unknown' | 'available' | 'unavailable';
 
 export interface PackagingArtworkText {
   id: string;
@@ -144,11 +146,24 @@ export interface PackagingBrief {
   productType: string;
   nicotine: PackagingNicotineStatus;
   nicotineDetails?: string;
+  clientCompany?: string;
+  packagingCompany?: string;
+  packagingCompanyRole?: PackagingCompanyRole;
+  packagingCompanyDetails?: string;
+  printerCountry?: string;
+  factoryScope?: string;
+  deviceCustomizationStatus?: PackagingCustomizationStatus;
+  deviceCustomizationDetails?: string;
   brandName: string;
   productName: string;
   packagingFormat: string;
   desiredLogo: string;
   suppliedCopy: string;
+  packagingMaterial?: string;
+  printMethod?: string;
+  colorPalette?: string;
+  printColorSpec?: string;
+  finishSpecification?: string;
   printerRequirements: string;
   dielineName: string;
   dielineSvg?: string;
